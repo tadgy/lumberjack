@@ -21,8 +21,8 @@ display_help() {
 	<template>.
 
 	Options (which are optional):
-	  -ca "<args>"	Set the compression command arguments.  Default: ${LJ_COMPRESSOR_ARGS[@]}.
-	                The quotes are required if more than 1 argument is required.
+	  -ca "<arg>"	Set the compression command arguments.  Default: ${LJ_COMPRESSOR_ARGS[@]}.
+	                The quotes are required if more than one <arg> is supplied.
 	  -cc <util>	Set the compression command to use.  Default: $LJ_COMPRESSOR.
 	  -f		Request flushing of the log file to disk after every write.
 	                This may significantly reduce performance and result in a lot of
@@ -118,7 +118,6 @@ open_fd() {
 
   [[ ! "$1" || ! "$2" ]] && return 1
 
-echo "Opening FD for file $2"
   umask "$LJ_FILE_UMASK"
   exec {LJ_FDS[$1]}>>"$2" || {
     syslog "error" "failed to open log file for writing: $2"
@@ -128,28 +127,49 @@ echo "Opening FD for file $2"
 }
 
 sigchld_handler() {
-echo "SIGCHLD handler"
   local LJ_JOB
   for LJ_JOB in "${!LJ_JOBS[@]}"; do
     [[ "${LJ_JOBS[$LJ_JOB]}" ]] && {
       ! kill -0 "${LJ_JOBS[$LJ_JOB]}" >/dev/null 2>&1 && {
-echo "Waiting for ${LJ_JOBS[$LJ_JOB]}"
         wait "${LJ_JOBS[$LJ_JOB]}"
         unset "LJ_JOBS[$LJ_JOB]"
         (( LJ_RUNNING-- ))
       }
     }
   done
+  start_compression_jobs
   (( LJ_RUNNING == 0 )) && set +bm
+}
+
+sigterm_handler() {
+  local LJ_SITE
+  for LJ_SITE in "${!LJ_FDS[@]}"; do
+    { exec {LJ_FDS[$LJ_SITE]}>&-; } 2>/dev/null
+  done
+  exit 0
+}
+
+start_compression_jobs() {
+  local LJ_JOB
+  while (( LJ_RUNNING < LJ_MAXJOBS )); do
+    for LJ_JOB in "${!LJ_JOBS[@]}"; do
+      [[ ! "${LJ_JOBS[$LJ_JOB]}" ]] && {
+        set -bm
+        "$LJ_COMPRESSOR" "${LJ_COMPRESSOR_ARGS[@]}" "$LJ_JOB" >/dev/null 2>&1 &
+        LJ_JOBS[$LJ_JOB]="$!"
+        (( LJ_RUNNING++ ))
+        continue 2
+      }
+    done
+    break
+  done
 }
 
 syslog() {
   # $1		The syslog level at which to log the message.
   # $2		The text of the message to log.
   [[ ! "$1" || ! "$2" ]] && return 1
-# FIXME:
-#  logger --id="$$" -p "user.$1" -t "$LJ_NAME" "$1: $2" 2>/dev/null
-  printf "%s: %s\n" "$1" "$2"
+  logger --id="$$" -p "user.$1" -t "$LJ_NAME" "$1: $2" 2>/dev/null
 }
 
 
@@ -170,13 +190,10 @@ LJ_NAME="${0##*/}"
 LJ_VERSION="0.1.0"
 
 # trap signals.
-# FIXME: Need to trap SIGCHLD and wait -n for the process.
-# FIXME: Can the SIGCHLD trap be set *only* when a compression process is running?  Wou;d save a lot of erronious calls...
 trap 'sigchld_handler' SIGCHLD
 trap '' SIGHUP
 trap 'syslog "info" "received SIGUSR1 ping request"' SIGUSR1
-# FIXME: flush all logs, close fd's, exit.
-trap 'exit 0' SIGTERM
+trap 'sigterm_handler' SIGTERM
 
 # Parse command line options.
 while :; do
@@ -293,10 +310,6 @@ LJ_TEMPLATE="$2"
 (( LJ_RAW == 0 )) && [[ ! "$LJ_TEMPLATE" =~ .*\{\} ]] && die "$LJ_TEMPLATE: template must include at least one '{}'"
 (( LJ_RAW != 0 )) && [[ "$LJ_TEMPLATE" =~ .*\{\} ]] && die "$LJ_TEMPLATE: template cannot include '{}'"
 
-# FIXME: This may need to be set for the exact sections of code where it's required as it causes a SIGCHLD for *every* completed
-# non-builtin command.
-#set -bm
-
 # Open the input file for reading.
 exec {LJ_INPUT_FD}<"$LJ_INPUT" || die "$LJ_INPUT: failed to open for reading"
 
@@ -313,43 +326,23 @@ while :; do
   LJ_TIMED_OUT=0
 
   # Start compression jobs if there's any in the queue.
-  while (( LJ_RUNNING < LJ_MAXJOBS )); do
-    for LJ_JOB in "${!LJ_JOBS[@]}"; do
-      [[ ! "${LJ_JOBS[$LJ_JOB]}" ]] && {
-echo "Starting job: $LJ_COMPRESSOR ${LJ_COMPRESSOR_ARGS[@]} $LJ_JOB"
-        set -bm
-        "$LJ_COMPRESSOR" "${LJ_COMPRESSOR_ARGS[@]}" "$LJ_JOB" &
-# >/dev/null 2>&1 &
-        LJ_JOBS[$LJ_JOB]="$!"
-        (( LJ_RUNNING++ ))
-        continue 2
-      }
-    done
-    break
-  done
+  start_compression_jobs
 
   # The time until the top of the next minute - this is used for the 'read' timeout so that
   # closing log files and compression can still occur even if no log lines are written.
   # Note: This does mean we can't have per second log files, but I can't see that being a requirement.
   LJ_TTNM="$(( 60 - 10#$(printf "%(%S)T") ))"
 
-echo
-date
-echo "Waiting for input, timeout: $LJ_TTNM"
-
   # Read the log line.
   # Note: The $(...) expansion should *not* be quoted in this instance.
-#echo read -r -t "$LJ_TTNM" -u "$LJ_INPUT_FD" $((( LJ_RAW == 0 )) && printf "%s" "LJ_LOG_VHOST") LJ_LOG_DATA
   read -r -t "$LJ_TTNM" -u "$LJ_INPUT_FD" $((( LJ_RAW == 0 )) && printf "%s" "LJ_LOG_VHOST") LJ_LOG_DATA
   LJ_ERR=$?
   if (( LJ_ERR > 128 )); then
     # If 'read' timed out, set a marker.
-echo "read timed out"
     LJ_TIMED_OUT=1
   elif (( LJ_ERR == 1 )); then
     # An error occured (the pipe was likely closed by the server).
     # The sleep will prevent the script eating CPU if the fifo is closed by the server.
-echo "read error 1"
     sleep 1
     continue
   elif (( LJ_ERR != 0 )); then
@@ -363,18 +356,12 @@ echo "read error 1"
   # Expand the strftime-encoded strings in the template.
   LJ_EXPANDED_TEMPLATE="$(printf "%($LJ_TEMPLATE)T")"
 
-echo "Exp template: $LJ_EXPANDED_TEMPLATE"
-
   # The old expanded template needs to be seeded if it's not already set from a previous loop.
   # Set it to the same as the current expanded template so that no rotation is done the first time around.
   [[ -z "$LJ_OLD_TEMPLATE" ]] && LJ_OLD_TEMPLATE="$LJ_EXPANDED_TEMPLATE"
 
-echo "Old template: $LJ_OLD_TEMPLATE"
-
   # If the 'read' timed out and the exapnded template is the same as the old expanded template, there is no need to do anything.
   (( LJ_TIMED_OUT == 1 )) && [[ "$LJ_EXPANDED_TEMPLATE" == "$LJ_OLD_TEMPLATE" ]] && continue
-
-echo "Checking basedir"
 
   # Make sure the base directory still exists - it could have disappeared while we were blocked in 'read'.
   # Note: We won't make this directory ourselves - as it's the base directory it should exist on the system to start with.
@@ -384,27 +371,20 @@ echo "Checking basedir"
   }
   is_dir "$LJ_BASEDIR" || continue
 
-echo "Old: $LJ_OLD_TEMPLATE"
-echo "New: $LJ_EXPANDED_TEMPLATE"
-
   # If the new expanded template is different from the old, close and reopen all the logs and queue for compression (if required).
   [[ "$LJ_EXPANDED_TEMPLATE" != "$LJ_OLD_TEMPLATE" ]] && {
-echo "Closing FDs..."
     # Loop through all the open FDs.
     for LJ_SITE in "${!LJ_FDS[@]}"; do
       # Generate the fully expanded filename from the strftime-expanded template and the site name from the array.
       LJ_FILENAME="$LJ_BASEDIR/${LJ_EXPANDED_TEMPLATE//\{\}/$LJ_SITE}"
-echo "Filename: $LJ_FILENAME"
 
       # Close the file descriptor for the old log file path.
-echo "Closing FD ${LJ_FDS[$LJ_SITE]}"
       { exec {LJ_FDS[$LJ_SITE]}>&-; } 2>/dev/null || {
         syslog "warn" "failed to close FD ${LJ_FDS[$LJ_SITE]} for $LJ_SITE"
         # Don't 'continue' here as we should still be able to open the new log file.  But, it'll leave an FD open indefinitely...
       }
       unset "LJ_FDS[$LJ_SITE]"
       # Create (if necessary) and verify new log file dir.
-echo "Make/check new dir: ${LJ_FILENAME%/*}"
       make_dir "${LJ_FILENAME%/*}" || continue
       is_dir "${LJ_FILENAME%/*}" || continue
 
@@ -413,7 +393,6 @@ echo "Make/check new dir: ${LJ_FILENAME%/*}"
 
       # Fix the now broken symlink - point it to the currently active log file.
       [[ "$LJ_LINKFILE" ]] && {
-echo "Fix link"
         # Note: This will clobber anything that already exists with the link name.
         rm -rf "${LJ_FILENAME%/*}/$LJ_LINKFILE"
         ln -sf "${LJ_FILENAME##*/}" "${LJ_FILENAME%/*}/$LJ_LINKFILE" 2>/dev/null || {
@@ -423,7 +402,6 @@ echo "Fix link"
 
       # Add the old log file to the compression jobs task list.
       (( LJ_COMPRESS != 0 )) && {
-echo "Adding to jobs list: $LJ_BASEDIR/${LJ_OLD_TEMPLATE//\{\}/$LJ_SITE}"
         LJ_JOBS+=([$LJ_BASEDIR/${LJ_OLD_TEMPLATE//\{\}/$LJ_SITE}]="")
       }
     done
@@ -445,9 +423,7 @@ echo "Adding to jobs list: $LJ_BASEDIR/${LJ_OLD_TEMPLATE//\{\}/$LJ_SITE}"
     # Generate the fully expanded filename from the strftime-expanded template.
     LJ_FILENAME="$LJ_BASEDIR/${LJ_EXPANDED_TEMPLATE//\{\}/$LJ_LOG_VHOST}"
 
-echo "Filename: $LJ_FILENAME"
-
-echo "Make/check new dir: ${LJ_FILENAME%/*}"
+    # Create/check the log file directory.
     make_dir "${LJ_FILENAME%/*}" || continue
     is_dir "${LJ_FILENAME%/*}" || continue
 
@@ -456,25 +432,17 @@ echo "Make/check new dir: ${LJ_FILENAME%/*}"
       open_fd "$LJ_LOG_VHOST" "$LJ_FILENAME" || continue
     }
 
-echo "VHOST: $LJ_LOG_VHOST"
-echo "DATA:  $LJ_LOG_DATA"
-echo "FD:    ${LJ_FDS[$LJ_LOG_VHOST]}"
-
     # Write the log entry.
     printf "%s\n" "$LJ_LOG_DATA" >&"${LJ_FDS[$LJ_LOG_VHOST]}"
 
-echo "Written log"
-
     # Flush data to disk if requested.
     (( LJ_FLUSH == 1 )) && {
-echo "Flush log"
       sync "$LJ_FILENAME" 2>/dev/null || syslog "warn" "failed to sync: $LJ_FILENAME"
     }
 
     # Create symlink to the currently active log file.
     [[ "$LJ_LINKFILE" ]] && {
       [[ "$(readlink -n "${LJ_FILENAME%/*}/$LJ_LINKFILE")" != "${LJ_FILENAME##*/}" ]] && {
-echo "Update link"
         # Note: This will clobber anything that already exists with the link name.
         rm -rf "${LJ_FILENAME%/*}/$LJ_LINKFILE"
         ln -sf "${LJ_FILENAME##*/}" "${LJ_FILENAME%/*}/$LJ_LINKFILE" 2>/dev/null || {
@@ -486,6 +454,4 @@ echo "Update link"
 
   # Store the last used filename.
   LJ_OLD_TEMPLATE="$LJ_EXPANDED_TEMPLATE"
-
-echo "End cycle"
 done
