@@ -1,13 +1,13 @@
 # Lumberjack
 In its simplest form, lumberjack is a pipe logger for Apache HTTPd (and other daemons).
 
-Lumberjack can be used as the logger for piped logfiles using the HTTPd `CustomLog` directive - processing each log line and writing it out to the correct - per `VirtualHost` - log file.  It may also be used by other daemons capable of writing log files to a pipe, or via a FIFO.
+Lumberjack can be used as the logger for piped log files using the HTTPd `CustomLog` directive - processing each log line and writing it out to the correct - per `VirtualHost` - log file.  It may also be used by other daemons capable of writing log files to a pipe, or via a FIFO.
 
 In contrast to having one logger process per `VirtualHost` (or a hard coded log file for each `VirtualHost`, as is the norm), lumberjack can be set as the pipe logger in the global section of the *httpd.conf* file, and - with an appropriate `LogFormat` specifier - will split off each log line for a different `VirtualHost` and write it to a per `VirtualHost` log file based upon a user defined template.
 
 Lumberjack may also be used in 'raw' mode in combination with the HTTPd `ErrorLog` directive to log errors, either on a per server or per `VirtualHost` basis to a log file based upon a user supplied template.
 
-### Main features
+### Additional features
   * Automatic log file compression (using a user specifiable compressor) after log files are rotated.
   * Request flushing/syncing of log files after each write (though this is not recommended).
   * Reading of log lines from a FIFO rather than stdin - allowing use with other daemons such as ftpd and rsyncd.
@@ -19,7 +19,10 @@ Lumberjack may also be used in 'raw' mode in combination with the HTTPd `ErrorLo
 
 -----
 ## Command line and templates
-There are two mandatory arguments when using lumberjack; the base directory of the log file path (`<basedir>`) and the template of the log file name (`<template>`).  All other options are not required and only serve to modify the behaviour of lumberjack.
+```
+lumberjack [options] <basedir> <template>
+```
+There are two mandatory arguments when using lumberjack; the base directory of the log file path (`<basedir>`) and the template of the log file path (`<template>`).  All other `[options]` are not required and only serve to modify the behaviour of lumberjack.
 
 The base directory (`<basedir>`) is the path to the root of where the log files should be written.  This could be, for example, the root of the tree of sites which are virtualhosted, each with their own `logs/` directory.  Or it could be a seperate directory tree specifically for log files.  The `<basedir>` is pretty flexible and highly dependant upon your local filesystem layout.
 
@@ -30,7 +33,7 @@ Personally, I use a layout resembling:
                                    html/      - Where the web content is stored.
                                    logs/      - The logs directory for the site.
 ```
-Under the `logs/` directory, files would be written in the format: `access-log-YY-MM` - where `YY` is the two digit year, and `MM` is the two digit month.  An example full logfile path would therefore be: `/data/sites/afterdark.org.uk/logs/access-log-18-04`
+Under the `logs/` directory, I have files written in the format: `access-log-YY-MM` - where `YY` is the two digit year, and `MM` is the two digit month.  An example full logfile path would therefore be: `/data/sites/afterdark.org.uk/logs/access-log-18-04`
 
 To accomplish this format for a log file, the `<template>` would need to be set to: `{}/logs/access-log-%y-%m`.  `{}` appearing anywhere (even multiple times) in the template will be replaced with the site name as taken from `VirtualHost` identifier in the *httpd.conf* (see usage below for how to configure this for use with lumberjack).  The `%y-%m` are [`strftime()`](http://man7.org/linux/man-pages/man3/strftime.3.html) encoded expansions which would yeild the current two digit year, and current two digit month.
 
