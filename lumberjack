@@ -52,7 +52,7 @@ display_help() {
 	Arguments (all of which are mandatory):
 	  <basedir>	The base directory of where to write the log files.
 	  <template>	The filename template.  When normal mode, the template must
-	                include at least one occurance of '{}', which is replaced with
+	                include at least one occurrance of '{}', which is replaced with
 	                the site name from the VirtualHost identifier.  In raw mode
 	                (-r), '{}' should not be included in the template.  The template
 	                may also include any %-escaped format strings recognised by the
@@ -63,13 +63,13 @@ display_help() {
 	  string:
 	    "|$LJ_NAME '/path/to/logsdir' '{}/logs/access-log-%Y-%m'"
 	      Where the httpd VirtualHost identifier is 'example.com', would write logs
-	      (with the site identifier steipped) to the filename:
+	      (with the site identifier stripped) to the filename:
 	        /path/to/logsdir/example.com/logs/access-log-<year>-<month>
 	    "|$LJ_NAME '/path/to/logsdir' '{}/logs/()-access-log-%Y-%m'"
 	      Where the httpd VirtualHost identifier is 'example.com', would write logs
 	      (with the site identifier steipped) to the filename:
 	        /path/to/logsdir/example.com/logs/example.com-access-log-<year>-<month>
-	  When used with the httpd ErrorLog directive (both examples are equilivant):
+	  When used with the httpd ErrorLog directive (both examples are equilivent):
 	    "|$LJ_NAME -r '/path/to/logsdir' 'logs/error-log-%Y-%m'"
 	      Would write raw log lines to the filename:
 	        /path/to/logsdir/logs/error-log-<year>-<month>
@@ -103,7 +103,6 @@ is_dir() {
 
 make_dir() {
   # $1		The directory to create.
-  # $2		The permissions to assign to the new directory.
   [[ ! "$1" ]] && return 1
   [[ ! -e "$1" ]] && {
     umask "$LJ_DIR_UMASK"
@@ -397,10 +396,11 @@ while :; do
 
       # Fix the now broken symlink - point it to the currently active log file.
       [[ "$LJ_LINKFILE" ]] && {
+        LJ_LINKFILE_EXPANDED="$(printf "%($LJ_LINKFILE)T")"
         # Note: This will clobber anything that already exists with the link name.
-        rm -rf "${LJ_FILENAME%/*}/$LJ_LINKFILE"
-        ln -sf "${LJ_FILENAME##*/}" "${LJ_FILENAME%/*}/$LJ_LINKFILE" 2>/dev/null || {
-          syslog "error" "failed to fix link: ${LJ_FILENAME%/*}/$LJ_LINKFILE"
+        rm -rf "$LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_SITE}"
+        ln -sfr "$LJ_FILENAME" "$LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_SITE}" 2>/dev/null || {
+          syslog "error" "failed to fix link: $LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_SITE}"
         }
       }
 
@@ -447,8 +447,8 @@ while :; do
     # Create symlink to the currently active log file.
     [[ "$LJ_LINKFILE" ]] && {
       LJ_LINKFILE_EXPANDED="$(printf "%($LJ_LINKFILE)T")"
-      [[ "$(stat -L --printf="%m %i" "$LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_LOG_VHOST}" 2>/dev/null)" != \
-        "$(stat --printf="%m %i" "$LJ_FILENAME" 2>/dev/null)" ]] && {
+      [[ "$(stat -L --printf="%d:%i" "$LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_LOG_VHOST}" 2>/dev/null)" != \
+        "$(stat --printf="%d:%i" "$LJ_FILENAME" 2>/dev/null)" ]] && {
         # Note: This will clobber anything that already exists with the link name.
         rm -rf "$LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_LOG_VHOST}"
         ln -sfr "$LJ_FILENAME" "$LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_LOG_VHOST}" 2>/dev/null || {
