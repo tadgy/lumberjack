@@ -187,7 +187,7 @@ LJ_COMPRESS=0
 
 # Script details.
 LJ_NAME="${0##*/}"
-LJ_VERSION="0.1.0"
+LJ_VERSION="0.1.1"
 
 # trap signals.
 trap 'sigchld_handler' SIGCHLD
@@ -219,7 +219,7 @@ while :; do
       shift
       continue
       ;;
-    -h)
+    -h|-help|--help)
       # Show the help screen and exit.
       display_help
       exit 0
