@@ -189,7 +189,7 @@ LJ_COMPRESS=0
 
 # Script details.
 LJ_NAME="${0##*/}"
-LJ_VERSION="0.1.2"
+LJ_VERSION="0.1.3"
 
 # trap signals.
 trap 'sigchld_handler' SIGCHLD
