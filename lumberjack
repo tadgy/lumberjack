@@ -190,7 +190,7 @@ LJ_COMPRESS=0
 
 # Script details.
 LJ_NAME="${0##*/}"
-LJ_VERSION="0.1.1"
+LJ_VERSION="0.1.2"
 
 # trap signals.
 trap 'sigchld_handler' SIGCHLD
@@ -446,12 +446,13 @@ while :; do
 
     # Create symlink to the currently active log file.
     [[ "$LJ_LINKFILE" ]] && {
-      LJ_LINKFILE_EXPANDED=="$(printf "%($LJ_LINKFILE)T")"
-      [[ "$(readlink -n "${LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_SITE}")" != "${LJ_FILENAME##*/}" ]] && {
+      LJ_LINKFILE_EXPANDED="$(printf "%($LJ_LINKFILE)T")"
+      [[ "$(stat -L --printf="%m %i" "$LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_LOG_VHOST}" 2>/dev/null)" != \
+        "$(stat --printf="%m %i" "$LJ_FILENAME" 2>/dev/null)" ]] && {
         # Note: This will clobber anything that already exists with the link name.
-        rm -rf "${LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_SITE}"
-        ln -sfr "$LJ_FILENAME" "${LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_SITE}" 2>/dev/null || {
-          syslog "error" "failed to create link: ${LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_SITE}"
+        rm -rf "$LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_LOG_VHOST}"
+        ln -sfr "$LJ_FILENAME" "$LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_LOG_VHOST}" 2>/dev/null || {
+          syslog "error" "failed to create link: $LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_LOG_VHOST}"
         }
       }
     }
