@@ -104,7 +104,7 @@ make_dir() {
   [[ ! "$1" ]] && return 1
   [[ ! -e "$1" ]] && {
     umask "$LJ_DIR_UMASK"
-    mkdir "$1" 2>/dev/null || {
+    mkdir -p "$1" 2>/dev/null || {
       syslog "error" "failed to create directory: $1"
       return 1
     }
