@@ -20,7 +20,7 @@ display_help() {
 	stdin or a FIFO and write a log line to a log file based upon the <basedir> and
 	<template>.
 
-	Options (which are optional):
+	Options (all of which are optional):
 	  -ca "<arg>"	Set the compression command arguments.  Default: ${LJ_COMPRESSOR_ARGS[@]}.
 	                The quotes are required if more than one <arg> is supplied.
 	  -cc <util>	Set the compression command to use.  Default: $LJ_COMPRESSOR.
@@ -32,7 +32,10 @@ display_help() {
 	  -j <jobs>	Maximum number of compression jobs to have active at once.
 	                Default: $LJ_MAXJOBS.  Don't set this too high.
 	  -l <link>	Create a symlink named <link> to the currently active log file.
-	                The symlink is created in the same directory as the log file.
+	                The <link> is created relative to <basedir>.  The link name may
+	                include the same {} sequence and %-escaped formatting as the
+	                <template> - see below for an explanation of these expansions.
+	                WARNING: The (expanded) location of this link will be WIPED OUT!
 	  -r		Raw logging mode.  In this mode, no processing of the log line
 	                for an httpd VirtualHost site identifier is performed - log
 	                lines are written verbatim to the log filename constructed from
@@ -46,7 +49,7 @@ display_help() {
 	  --		Cease option processing and begin argument parsing.
         Option processing ceases with the first non-option argument or --.
 
-	Arguments (which are required):
+	Arguments (all of which are mandatory):
 	  <basedir>	The base directory of where to write the log files.
 	  <template>	The filename template.  When normal mode, the template must
 	                include at least one occurance of '{}', which is replaced with
@@ -244,7 +247,8 @@ while :; do
     -l)
       # Set the link name to use.
       [[ ! "$2" ]] && die "missing argument to -l"
-      [[ "$2" =~ .*/ ]] && die "$2: link name cannot include '/'"
+      [[ "${2:0:1}" == "/" ]] && die "$2: link name cannot begin with '/'"
+      [[ "${2: -1:1}" == "/" ]] && die "$2: link name cannot end with '/'"
       LJ_LINKFILE="$2"
       shift 2
       continue
@@ -306,7 +310,7 @@ LJ_BASEDIR="$1"
 [[ ! -e "$LJ_BASEDIR" ]] && die "$LJ_BASEDIR: base directory does not exist"
 [[ ! -d "$LJ_BASEDIR" ]] && die "$LJ_BASEDIR: not a directory"
 LJ_TEMPLATE="$2"
-[[ "${LJ_TEMPLATE: -1:1}" = "/" ]] && die "$LJ_TEMPLATE: template cannot end with '/'"
+[[ "${LJ_TEMPLATE: -1:1}" == "/" ]] && die "$LJ_TEMPLATE: template cannot end with '/'"
 (( LJ_RAW == 0 )) && [[ ! "$LJ_TEMPLATE" =~ .*\{\} ]] && die "$LJ_TEMPLATE: template must include at least one '{}'"
 (( LJ_RAW != 0 )) && [[ "$LJ_TEMPLATE" =~ .*\{\} ]] && die "$LJ_TEMPLATE: template cannot include '{}'"
 
@@ -442,11 +446,12 @@ while :; do
 
     # Create symlink to the currently active log file.
     [[ "$LJ_LINKFILE" ]] && {
-      [[ "$(readlink -n "${LJ_FILENAME%/*}/$LJ_LINKFILE")" != "${LJ_FILENAME##*/}" ]] && {
+      LJ_LINKFILE_EXPANDED=="$(printf "%($LJ_LINKFILE)T")"
+      [[ "$(readlink -n "${LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_SITE}")" != "${LJ_FILENAME##*/}" ]] && {
         # Note: This will clobber anything that already exists with the link name.
-        rm -rf "${LJ_FILENAME%/*}/$LJ_LINKFILE"
-        ln -sf "${LJ_FILENAME##*/}" "${LJ_FILENAME%/*}/$LJ_LINKFILE" 2>/dev/null || {
-          syslog "error" "failed to create link: ${LJ_FILENAME%/*}/$LJ_LINKFILE"
+        rm -rf "${LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_SITE}"
+        ln -sfr "$LJ_FILENAME" "${LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_SITE}" 2>/dev/null || {
+          syslog "error" "failed to create link: ${LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_SITE}"
         }
       }
     }
