@@ -32,9 +32,10 @@ display_help() {
 	  -j <jobs>	Maximum number of compression jobs to have active at once.
 	                Default: $LJ_MAXJOBS.  Don't set this too high.
 	  -l <link>	Create a symlink named <link> to the currently active log file.
-	                The <link> is created relative to <basedir>.  The link name may
-	                include the same {} sequence and %-escaped formatting as the
-	                <template> - see below for an explanation of these expansions.
+	                The <link> is created relative to <basedir>.  In normal mode,
+	                the link name may include the same '{}' sequence and %-escaped
+	                formatting as the <template> (see below).  In raw mode (-r), the
+	                '{}' is not allowed, but % escape sequences can still be used.
 	                WARNING: The (expanded) location of this link will be WIPED OUT!
 	  -r		Raw logging mode.  In this mode, no processing of the log line
 	                for an httpd VirtualHost site identifier is performed - log
@@ -51,12 +52,12 @@ display_help() {
 
 	Arguments (all of which are mandatory):
 	  <basedir>	The base directory of where to write the log files.
-	  <template>	The filename template.  When normal mode, the template must
+	  <template>	The filename template.  When in normal mode, the template must
 	                include at least one occurrance of '{}', which is replaced with
 	                the site name from the VirtualHost identifier.  In raw mode
-	                (-r), '{}' should not be included in the template.  The template
-	                may also include any %-escaped format strings recognised by the
-	                strftime(3) function.  See below for examples.
+	                (-r), the '{}' should not be included in the template.  The
+	                template  may also include any %-escaped format strings
+	                recognised by the strftime(3) function.  See below for examples.
 
 	Examples:
 	  When used with the httpd CustomLog directive, using %v as the first log format
@@ -305,13 +306,16 @@ done
 
 # The remaining arguments should be the base directory and the template.
 LJ_BASEDIR="$1"
+LJ_TEMPLATE="$2"
+
+# Santy checking.
 [[ "${LJ_BASEDIR:0:1}" != "/" ]] && die "$LJ_BASEDIR: must be an absolute path"
 [[ ! -e "$LJ_BASEDIR" ]] && die "$LJ_BASEDIR: base directory does not exist"
 [[ ! -d "$LJ_BASEDIR" ]] && die "$LJ_BASEDIR: not a directory"
-LJ_TEMPLATE="$2"
 [[ "${LJ_TEMPLATE: -1:1}" == "/" ]] && die "$LJ_TEMPLATE: template cannot end with '/'"
 (( LJ_RAW == 0 )) && [[ ! "$LJ_TEMPLATE" =~ .*\{\} ]] && die "$LJ_TEMPLATE: template must include at least one '{}'"
 (( LJ_RAW != 0 )) && [[ "$LJ_TEMPLATE" =~ .*\{\} ]] && die "$LJ_TEMPLATE: template cannot include '{}'"
+(( LJ_RAW != 0 )) && [[ "$LJ_LINKFILE" =~ .*\{\} ]] && die "$LJ_LINKFILE: link name cannot include '{}'"
 
 # The array of file descriptors corresponding to each path.
 declare -A LJ_FDS
