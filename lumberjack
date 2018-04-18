@@ -313,9 +313,6 @@ LJ_TEMPLATE="$2"
 (( LJ_RAW == 0 )) && [[ ! "$LJ_TEMPLATE" =~ .*\{\} ]] && die "$LJ_TEMPLATE: template must include at least one '{}'"
 (( LJ_RAW != 0 )) && [[ "$LJ_TEMPLATE" =~ .*\{\} ]] && die "$LJ_TEMPLATE: template cannot include '{}'"
 
-# Open the input file for reading.
-exec {LJ_INPUT_FD}<"$LJ_INPUT" || die "$LJ_INPUT: failed to open for reading"
-
 # The array of file descriptors corresponding to each path.
 declare -A LJ_FDS
 # The array of jobs needing to be compressed.
@@ -338,19 +335,13 @@ while :; do
 
   # Read the log line.
   # Note: The $(...) expansion should *not* be quoted in this instance.
-  read -r -t "$LJ_TTNM" -u "$LJ_INPUT_FD" $((( LJ_RAW == 0 )) && printf "%s" "LJ_LOG_VHOST") LJ_LOG_DATA
+  read -r -t "$LJ_TTNM" $((( LJ_RAW == 0 )) && printf "%s" "LJ_LOG_VHOST") LJ_LOG_DATA <"$LJ_INPUT"
   LJ_ERR=$?
   if (( LJ_ERR > 128 )); then
     # If 'read' timed out, set a marker.
     LJ_TIMED_OUT=1
-  elif (( LJ_ERR == 1 )); then
-    # An error occured (the pipe was likely closed by the server).
-    # The sleep will prevent the script eating CPU if the fifo is closed by the server.
-    sleep 1
-    continue
   elif (( LJ_ERR != 0 )); then
     # Unhandled error - sleep for a second and try again.
-    # The sleep will prevent the script eating CPU if the fifo is closed by the server.
     syslog "error" "unhandled return code from 'read': $ERR"
     sleep 1
     continue
