@@ -10,6 +10,7 @@
 LJ_NAME="${0##*/}"
 LJ_VERSION="0.1.4"
 
+
 die() {
   # $1		The text of the error message to display on stderr.
   printf "%s: %s\n" "$LJ_NAME" "$1" >&2
@@ -346,7 +347,7 @@ while :; do
     LJ_TIMED_OUT=1
   elif (( LJ_ERR != 0 )); then
     # Unhandled error - sleep for a second and try again.
-    syslog "error" "unhandled return code from 'read': $ERR"
+    syslog "error" "unhandled return code from 'read': $LJ_ERR"
     sleep 1
     continue
   fi
