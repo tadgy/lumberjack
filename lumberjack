@@ -154,6 +154,7 @@ sigterm_handler() {
   for LJ_SITE in "${!LJ_FDS[@]}"; do
     { exec {LJ_FDS[$LJ_SITE]}>&-; } 2>/dev/null
   done
+  disown -ah
   exit 0
 }
 
