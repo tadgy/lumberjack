@@ -8,7 +8,7 @@
 
 # Script details.
 LJ_NAME="${0##*/}"
-LJ_VERSION="0.1.4"
+LJ_VERSION="0.1.5"
 
 
 die() {
@@ -18,7 +18,7 @@ die() {
 }
 
 display_help() {
-  #     |--------1---------2---------3---------4---------5---------6---------7---------8
+  #     |........1.........2.........3.........4.........5.........6.........7.........8
   cat <<-EOF
 	Usage: $LJ_NAME [options] <basedir> <template>
 	Process input (possibly including an httpd VirtualHost site identifier) from
@@ -86,7 +86,7 @@ EOF
 }
 
 display_version() {
-  #     |--------1---------2---------3---------4---------5---------6---------7---------8
+  #     |........1.........2.........3.........4.........5.........6.........7.........8
   cat <<-EOF
 	$LJ_NAME v$LJ_VERSION.
 	Copyright (c) 2018 Darren 'Tadgy' Austin <darren (at) afterdark.org.uk>.
@@ -150,7 +150,7 @@ sigchld_handler() {
 }
 
 sigterm_handler() {
-  local LJ_SITE
+  local LJ_SITE LJ_JOB
   for LJ_SITE in "${!LJ_FDS[@]}"; do
     { exec {LJ_FDS[$LJ_SITE]}>&-; } 2>/dev/null
   done
@@ -342,10 +342,15 @@ while :; do
   # Read the log line.
   # Note: The $(...) expansion should *not* be quoted in this instance.
   read -r -t "$LJ_TTNM" $((( LJ_RAW == 0 )) && printf "%s" "LJ_LOG_VHOST") LJ_LOG_DATA <"$LJ_INPUT"
-  LJ_ERR=$?
+  LJ_ERR="$?"
   if (( LJ_ERR > 128 )); then
     # If 'read' timed out, set a marker.
     LJ_TIMED_OUT=1
+  elif (( LJ_ERR == 1 )); then
+    [[ "$LJ_INPUT" == "/dev/stdin" ]] && {
+      # stdin has been closed by the parent, quit gracefully by raising a SIGTERM.
+      kill -TERM "$$"
+    }
   elif (( LJ_ERR != 0 )); then
     # Unhandled error - sleep for a second and try again.
     syslog "error" "unhandled return code from 'read': $LJ_ERR"
