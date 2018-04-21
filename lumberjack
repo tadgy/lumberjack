@@ -231,6 +231,7 @@ while :; do
     -i)
       # Use a FIFO instead of stdin - the FIFO must already exist (use 'mkfifo' first).
       [[ ! "$2" ]] && die "missing argument to -f"
+      [[ "${2:0:1}" != "/" ]] && die "$2: must be an absolute path"
       [[ ! -e "$2" ]] && die "$2: no such file"
       [[ ! -p "$2" ]] && due "$2: not a FIFO"
       LJ_INPUT="$2"
