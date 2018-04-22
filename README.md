@@ -30,8 +30,8 @@ Personally, I use a layout resembling:
 ```
     /data/sites/                              - This would be my `<basedir>`.
                 <virtualhost name>/           - This is the name of the site served by the `VirtualHost`.
-                                   cgi-bin/   - The virtual host's CGI binaries directory.
-                                   html/      - The virtual host's web content.
+                                   cgi-bin/   - The virtual host\'s CGI binaries directory.
+                                   html/      - The virtual host\'s web content.
                                    logs/      - The logs directory for the virtual host.
 ```
 Under the `logs/` directory, I have files written in the format: `YYYY/MM/filename.log` - where `YYYY` is the year, and `MM` is the two digit month.  An example full logfile path would therefore be: `/data/sites/afterdark.org.uk/logs/2018/04/httpd-access.log`.
