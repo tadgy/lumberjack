@@ -30,8 +30,8 @@ Personally, I use a layout resembling:
 ```
     /data/sites/                              - This would be my `<basedir>`.
                 <virtualhost name>/           - This is the name of the site served by the `VirtualHost`.
-                                   cgi-bin/   - The virtual host\'s CGI binaries directory.
-                                   html/      - The virtual host\'s web content.
+                                   cgi-bin/   - The virtual host's CGI binaries directory.
+                                   html/      - The virtual host's web content.
                                    logs/      - The logs directory for the virtual host.
 ```
 Under the `logs/` directory, I have files written in the format: `YYYY/MM/filename.log` - where `YYYY` is the year, and `MM` is the two digit month.  An example full logfile path would therefore be: `/data/sites/afterdark.org.uk/logs/2018/04/httpd-access.log`.
@@ -87,7 +87,11 @@ Unfortunately, because Apache HTTPd does not allow custom formats for the error 
 Here, the `<basedir>` includes the full path to the logs directory to be used, since it cannot be parsed from the log line itself.  The `<template>` and link name (`-l`) have also been changed to fit with the new `<basedir>`.
 
 ### As a generic 'raw' pipe logger (for use with other daemons)
+As a side benefit of the 'raw' logging mode which can be used for the `ErrorLog` handling above, lumberjack can be used as a generic pipe logger for any daemon which supports logging via a pipe or a FIFO (see next section for details on FIFO logging).
 
+As long as a daemon can log via a pipe, lumberjack can be used in the same was as demonstrated in the `ErrorLog` section above.  The only details that would need to be changed are the `<basedir>`, `<template>` and any configured link name.
+
+Personally, I use lumberjack to handle the logging (and rotation/compression of old logs) for not only HTTPd, but also for ProFTPd and rsyncd - the latter two by making use of a FIFO.
 
 ### With a FIFO
 Using lumberjack with daemons that do not support pipe logging is as simple as setting up a FIFO for them to write their logs to, and telling lumberjack where to find it.
