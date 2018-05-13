@@ -369,6 +369,9 @@ while :; do
   # If the 'read' timed out and the exapnded template is the same as the old expanded template, there is no need to do anything.
   (( LJ_TIMED_OUT == 1 )) && [[ "$LJ_EXPANDED_TEMPLATE" == "$LJ_OLD_TEMPLATE" ]] && continue
 
+  # If the 'read' did not time out but the line read is empty, don't do anything.
+  (( LJ_TIMED_OUT != 1 )) && [[ "$LJ_LOG_DATA" =~ ^[[:space:]]*$ ]] && continue
+
   # Make sure the base directory still exists - it could have disappeared while we were blocked in 'read'.
   # Note: We won't make this directory ourselves - as it's the base directory it should exist on the system to start with.
   [[ ! -e "$LJ_BASEDIR" ]] && {
