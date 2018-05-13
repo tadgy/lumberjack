@@ -8,7 +8,7 @@
 
 # Script details.
 LJ_NAME="${0##*/}"
-LJ_VERSION="0.1.5"
+LJ_VERSION="0.1.6"
 
 
 die() {
