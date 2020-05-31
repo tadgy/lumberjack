@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright (c) 2018:
+# Copyright (c) 2018-2020:
 #   Darren 'Tadgy' Austin <darren (at) afterdark.org.uk>
 # Licensed under the terms of the GNU General Public License version 3.
 #
@@ -8,7 +8,7 @@
 
 # Script details.
 LJ_NAME="${0##*/}"
-LJ_VERSION="0.1.6"
+LJ_VERSION="0.1.7"
 
 
 die() {
@@ -26,8 +26,8 @@ display_help() {
 	<template>.
 
 	Options (all of which are optional):
-	  -ca "<arg>"	Set the compression command arguments.  Default: ${LJ_COMPRESSOR_ARGS[@]}.
-	                The quotes are required if more than one <arg> is supplied.
+	  -ca <arg>	Set the compression command arguments.  Default: ${LJ_COMPRESSOR_ARGS[@]}.
+	                Quotes are required if more than one <arg> is supplied.
 	  -cc <util>	Set the compression command to use.  Default: $LJ_COMPRESSOR.
 	  -f		Request flushing of the log file to disk after every write.
 	                This may significantly reduce performance and result in a lot of
@@ -53,7 +53,7 @@ display_help() {
 	  -v		Display version and copyright information.
 	  -z		Enable compression of the old log files.
 	  --		Cease option processing and begin argument parsing.
-        Option processing ceases with the first non-option argument or --.
+	  Option processing ceases with the first non-option argument or --.
 
 	Arguments (all of which are mandatory):
 	  <basedir>	The base directory of where to write the log files.
@@ -61,7 +61,7 @@ display_help() {
 	                include at least one occurrance of '{}', which is replaced with
 	                the site name from the VirtualHost identifier.  In raw mode
 	                (-r), the '{}' should not be included in the template.  The
-	                template  may also include any %-escaped format strings
+	                template may also include any %-escaped format strings
 	                recognised by the strftime(3) function.  See below for examples.
 
 	Examples:
@@ -89,7 +89,7 @@ display_version() {
   #     |........1.........2.........3.........4.........5.........6.........7.........8
   cat <<-EOF
 	$LJ_NAME v$LJ_VERSION.
-	Copyright (c) 2018 Darren 'Tadgy' Austin <darren (at) afterdark.org.uk>.
+	Copyright (c) 2018-2020 Darren 'Tadgy' Austin <darren (at) afterdark.org.uk>.
 	Licensed under the terms of the GNU GPL v3 <http://gnu.org/licenses/gpl.html>.
 	This program is free software; you can modify or redistribute it in accordence
 	with the GNU GPL.  However, it comes with ABSOLUTELY NO WARRANTY; not even the
