@@ -1,11 +1,11 @@
 # Lumberjack
-In its simplest form, lumberjack is a pipe logger for [Apache HTTPd](http://httpd.apache.org/) and other daemons.
+In its simplest form, lumberjack is a pipe logger for [Apache httpd](http://httpd.apache.org/) and other daemons.
 
-Lumberjack can be used as the logger for piped log files using the HTTPd `CustomLog` directive - processing each log line and writing it out to the correct - per `VirtualHost` - log file.  It may also be used by other daemons capable of writing log files to a pipe, or via a FIFO.
+Lumberjack can be used as the logger for piped log files using the httpd `CustomLog` directive - processing each log line and writing it out to the correct - per `VirtualHost` - log file.  It may also be used by other daemons capable of writing log files to a pipe/FIFO.
 
-In contrast to having one logger process per `VirtualHost` (or a hard coded log file for each `VirtualHost`, as is the norm), lumberjack can be set as the pipe logger in the global section of the *httpd.conf* file, and will - with an appropriate `LogFormat` specifier - split off each log line for a different `VirtualHost` and write it to a per `VirtualHost` log file based upon a user defined template.
+In contrast to having one logger process per `VirtualHost` (or a hard coded log file for each `VirtualHost`, as is the norm), lumberjack can be set as the single pipe logger in the global section of the *httpd.conf* file, and will - with an appropriate `LogFormat` specifier - split off each log line for a different `VirtualHost` and write it to a per `VirtualHost` log file based upon a user defined template.
 
-Lumberjack may also be used in 'raw' mode in combination with the HTTPd `ErrorLog` directive to log errors to a log file based upon a user supplied template, either on a per server or per `VirtualHost` basis.  'raw' mode also allows other daemons to log via lumberjack, either as a pipe logger or via a FIFO.
+Lumberjack may also be used in 'raw' mode in combination with the httpd `ErrorLog` directive to log errors to a log file based upon a user supplied template, either on a per server or per `VirtualHost` basis.  'raw' mode also allows other daemons to log via lumberjack, either as a pipe logger or via a FIFO.
 
 ### Additional features
   * Automatic log file compression (using a user specifiable compressor) after log files are rotated.
@@ -22,7 +22,7 @@ Lumberjack may also be used in 'raw' mode in combination with the HTTPd `ErrorLo
 ```
 lumberjack [options] <basedir> <template>
 ```
-There are two mandatory arguments when using lumberjack; the base directory of the log file path (`<basedir>`) and the template of the log file path (`<template>`).  All other `[options]` are not required and only serve to modify the behaviour of lumberjack.
+There are two mandatory arguments when using lumberjack; the base directory of the log file path (`<basedir>`) and the template of the log file path (`<template>`).  All other `[options]` are not required and only serve to modify the default behaviour of lumberjack.
 
 The base directory (`<basedir>`) is the path to the root of where the log files should be written.  This could be, for example, the root of the tree of sites which are virtual hosted, each with their own `logs/` sub-directory.  Or it could be a seperate directory tree specifically for log files.  The `<basedir>` is pretty flexible and highly dependant upon your local filesystem layout.
 
@@ -45,14 +45,14 @@ The templaing feature of lumberjack is one of its most powerful features.  It ca
 ## Usage
 A full set of currently supported options can be obtained using `lumberjack -h` - this will always show the most up to date usage and options.
 
-The usages detailed below are the simplest form of the logger - options such as `-ca`, `-cc`, `-f`, `-j`, `-ud` and `-uf` which modify the behaviour of lumberjack will not be included in the examples.  Using those options should be fairly self-explanitory after reading `lumberjack -h` output.
+The usages detailed below are the simplest form of the logger - options such as `-ca`, `-cc`, `-f`, `-j`, `-md` and `-mf` which modify the behaviour of lumberjack will not be included in the examples.  Using those options should be fairly self-explanitory after reading `lumberjack -h` output.
 
 ### As a global HTTPd `CustomLog` pipe logger
 In this mode of operation, you do not need to configure a `CustomLog` for each `VirtualHost` you use in your configuration.  Instead, the `CustomLog` directive is placed in the global section of the *httpd.conf* and will become effective for every `VirtualHost` (and the main server configuration, if used).
 
-This is the recommended mode of operation for Apache HTTPd, as it only uses a single lumberjack process to handle logs for every `VirtualHost` defined in the configuration.
+This is the recommended mode of operation for Apache httpd, as it only uses a single lumberjack process to handle logs for every `VirtualHost` defined in the configuration.
 
-Before configuring lumberjack as the `CustomLog` pipe logger in HTTPd, it is necessary to add a custom `LogFormat` specifier for use with lumberjack.  This new `LogFormat` specifier is the same as the standard Apache 'Common' or 'Combined' log formats - just with the addition of the '%v' specifier.  lumberjack may be used with any set of `LogFormat` specifiers, as long as the first item in the specifier is always `%v`.  
+Before configuring lumberjack as the `CustomLog` pipe logger in httpd, it is necessary to add a custom `LogFormat` specifier for use with lumberjack.  This new `LogFormat` specifier is the same as the standard Apache 'Common' or 'Combined' log formats - just with the addition of the '%v' specifier.  lumberjack may be used with any set of `LogFormat` specifiers, as long as the first item in the specifier is always `%v`.  
 
 For the purposes of this usage example, we will be using the 'Combined' log format.
 
@@ -73,13 +73,13 @@ Here, the `-l` and `-z` flags are extra options to lumberjack - they can be omit
 
 
 ### As an Apache HTTPd `ErrorLog` pipe logger
-Lumberjack can also be used to handle error logs generated by Apache HTTPd in almost the same way as the `CustomLog` example above.  The only difference is the addition of the `-r` option, to tell Lumberjack it should be working in 'raw' mode, and the `LogFormat` changes are not necessary.
+Lumberjack can also be used to handle error logs generated by Apache httpd in almost the same way as the `CustomLog` example above.  The only difference is the addition of the `-r` option, to tell Lumberjack it should be working in 'raw' mode, and the `LogFormat` changes are not necessary.
 
 Unlike in 'normal' mode, where lumberjack extracts the `VirtualHost` site identifier for use in the template (and removes that identifier from the lon entry written); in 'raw' mode, no procesing of the log line is performed - the `VirtualHost` identifier is not extracted to be used as part of the log file name, and the log line is written verbatim.
 
 In 'raw' mode, the template (and link name if specified) cannot include the special `{}` string, which is usually replaced with the `VirtualHost` site identifier when in 'normal' mode - Lumberjack will not start if either of those options include a `{}` sequence.
 
-Unfortunately, because Apache HTTPd does not allow custom formats for the error log (where we could include the site idetifier and only use one `ErrorLog` directive), we must use an `ErrorLog` per `VirtualHost`.  An example `ErrorLog` directive, based upon the examples given previously, would be:
+Unfortunately, because Apache httpd does not allow custom formats for the error log (where we could include the site idetifier and only use one `ErrorLog` directive), we must use an `ErrorLog` per `VirtualHost`.  An example `ErrorLog` directive, based upon the examples given previously, would be:
 ```
     ErrorLog    "|/path/to/lumberjack -l httpd-error.log -r -z /data/sites/afterdark.org.uk/logs %Y/%m-httpd-error.log"
 ```
@@ -91,7 +91,7 @@ As a side benefit of the 'raw' logging mode which can be used for the `ErrorLog`
 
 As long as a daemon can log via a pipe, lumberjack can be used in the same was as demonstrated in the `ErrorLog` section above.  The only details that would need to be changed are the `<basedir>`, `<template>` and any configured link name.
 
-Personally, I use lumberjack to handle the logging (and rotation/compression of old logs) for not only HTTPd, but also for ProFTPd and rsyncd - the latter two by making use of a FIFO.
+Personally, I use lumberjack to handle the logging (and rotation/compression of old logs) for not only httpd, but also for ProFTPd and rsyncd - the latter two by making use of a FIFO.
 
 ### With a FIFO
 Using lumberjack with daemons that do not support pipe logging is as simple as setting up a FIFO for them to write their logs to, and telling lumberjack where to find it.
