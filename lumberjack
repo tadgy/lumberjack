@@ -3,83 +3,167 @@
 #   Darren 'Tadgy' Austin <darren (at) afterdark.org.uk>
 # Licensed under the terms of the GNU General Public License version 3.
 #
-#........1.........2.........3.........4.........5.........6.........7.........8.........9.........0.........1.........2.........3.....:...4
+#........1.........2.........3.........4.........5.........6.........7.........8.........9.........0.........1..:......2.........3.........4.........5.........:
 
 
 # Script details.
-LJ_NAME="${0##*/}"
-LJ_VERSION="0.1.7"
+NAME="${0##*/}"
+VERSION="0.2.0"
 
+
+# Functions.
+check_leading_dirs() {
+  # $1		The virtual host being processed.
+  # $2		The path of which to validate the leading directories.
+
+  [[ -z "$1" || -z "$2" ]] && return 1
+
+  if ! is_dir "$(remove_expansions "$2")"; then
+    (( FLAGS[${1}-template_prefix] == 0 )) && {
+      syslog "warn" "prefix directories of template do not exist: $(remove_expansions "$2")"
+      FLAGS[${1}-template_prefix]=1
+    }
+    return 1
+  else
+    (( FLAGS[${1}-template_prefix] == 1 )) && {
+      syslog "info" "prefix directories of template reappeared: $(remove_expansions "$2")"
+      FLAGS[${1}-template_prefix]=0
+    }
+  fi
+  return 0
+}
+
+close_fd() {
+  # $1		The site of which to close the file descriptor.
+
+  [[ -z "$1" ]] && return 1
+
+  # shellcheck disable=SC1083
+  { exec {FDS[$1]}>&-; } 2>/dev/null || syslog "warn" "failed to close FD ${FDS[$1]} for $1"
+  unset "FDS[$1]" "FLAGS[${1}-template_prefix]" "FLAGS[${1}-make_dir_fail]" "FLAGS[${1}-fix_link]"
+}
+
+create_missing_dirs() {
+  # $1		The virtual host being processed.
+  # $2		The directory to insure exists.
+
+  [[ -z "$1" || -z "$2" ]] && return 1
+
+  if ! make_dir "$2"; then
+    (( FLAGS[${1}-make_dir_fail] == 0 )) && {
+      syslog "warn" "error creating log file's directory: $2"
+      FLAGS[${1}-make_dir_fail]=1
+    }
+    return 1
+  else
+    (( FLAGS[${1}-make_dir_fail] == 1 )) && {
+      syslog "info" "created log file's directory: $2"
+      FLAGS[${1}-make_dir_fail]=0
+    }
+  fi
+  return 0
+}
 
 die() {
   # $1		The text of the error message to display on stderr.
-  printf "%s: %s\n" "$LJ_NAME" "$1" >&2
+
+  printf "%s: %s\\n" "$NAME" "$1" >&2
   exit 1
 }
 
 display_help() {
   #     |........1.........2.........3.........4.........5.........6.........7.........8
   cat <<-EOF
-	Usage: $LJ_NAME [options] <basedir> <template>
+	Usage: $NAME [options] <basedir> <template>
 	Process input (possibly including an httpd VirtualHost site identifier) from
-	stdin or a FIFO and write a log line to a log file based upon the <basedir> and
-	<template>.
+	stdin or a pipe/FIFO and write a log line to a log file based upon the <basedir>
+	and <template>.
 
 	Options (all of which are optional):
-	  -ca <arg>	Set the compression command arguments.  Default: ${LJ_COMPRESSOR_ARGS[@]}.
+	  -ca <arg>	Set the compression command arguments.  Default: ${COMPRESSOR_ARGS[@]}.
 	                Quotes are required if more than one <arg> is supplied.
-	  -cc <util>	Set the compression command to use.  Default: $LJ_COMPRESSOR.
+	  -cc <util>	Set the compression command to use.  Default: $COMPRESSOR.
 	  -f		Request flushing of the log file to disk after every write.
 	                This may significantly reduce performance and result in a lot of
 	                disk writes.  Best to let the kernel do appropriate buffering.
+	  -g <group>	Set name of the group to run with.  Override the usual
+	                behaviour of using the primary group membership of the user
+	                specified with -u and run with this GID.  All files created by
+	                lumberjack will be owned by this group.  The default is to run
+	                with the primary group that executed lumberjack, which is
+	                usually root.
 	  -h		Display this help.
-	  -i <fifo>	Read input from the FIFO at <fifo>, rather than stdin.
+	  -i <pipe>	Read input from the pipe/FIFO at <pipe>, rather than stdin.
+	                If the pipe/FIFO does not exist, it will be created.
 	  -j <jobs>	Maximum number of compression jobs to have active at once.
-	                Default: $LJ_MAXJOBS.  Don't set this too high.
+	                Default: $MAXJOBS.  Don't set this too high.
 	  -l <link>	Create a symlink named <link> to the currently active log file.
 	                The <link> is created relative to <basedir>.  In normal mode,
 	                the link name may include the same '{}' sequence and %-escaped
 	                formatting as the <template> (see below).  In raw mode (-r), the
 	                '{}' is not allowed, but % escape sequences can still be used.
 	                WARNING: The (expanded) location of this link will be WIPED OUT!
+	  -md <umask>	Set the umask used when creating directories.  Default: $DIR_UMASK.
+	                Useful umasks are: 077, 066, 026 and 022.
+	  -mf <umask>	Set the umask used when creating files.  Default: $FILE_UMASK.
+	                Useful umasks are: 066 and 022.
+	  -mp <umask>	Set the umask used when creating the pipe.  Default: $PIPE_UMASK.
+	                Useful umasks are: 066 and 006.
+	  -p		Make all parents.  Normally, all directories up to - but not
+	                including - the first directory with non-escaped %-format
+	                strings of the <template> (see below) must already exist for the
+	                log lines to be written to the file.  With this option, the
+	                parent directories of the logfile will be created automatically.
+	                WARNING: This option can be unsafe with certain <template>
+	                formats - it can result in creation of arbitrary directories
+	                based on unclean input from outside sources.
 	  -r		Raw logging mode.  In this mode, no processing of the log line
 	                for an httpd VirtualHost site identifier is performed - log
 	                lines are written verbatim to the log filename constructed from
 	                <basedir> and <template>.
-	  -ud <umask>	Set the umask used when creating directories.  Default: $LJ_DIR_UMASK.
-	                Useful umasks are: 077, 066, 026 and 022.
-	  -uf <umask>	Set the umask used when creating files.  Default: $LJ_FILE_UMASK.
-	                Useful umasks are: 077 and 022.
+	  -s <facility>	Set the syslog facility to be used for logging.  Default: $SYSLOG_FACILITY.
+	  -u <user>	Set name of the user to run with.  With this option, as soon as
+	                lumberjack starts it will re-exec itself, running as this user.
+	                Without the -g option, the primary group of <user> is used for
+	                the running GID.  All files created by lumberjack will be owned
+	                by this user.  The default is to run as the user that executed
+	                lumberjack, which is usually root.
 	  -v		Display version and copyright information.
 	  -z		Enable compression of the old log files.
 	  --		Cease option processing and begin argument parsing.
 	  Option processing ceases with the first non-option argument or --.
 
 	Arguments (all of which are mandatory):
-	  <basedir>	The base directory of where to write the log files.
+	  <basedir>	The base directory of where to write the log files.  The base
+	                directory must exist.
 	  <template>	The filename template.  When in normal mode, the template must
 	                include at least one occurrance of '{}', which is replaced with
 	                the site name from the VirtualHost identifier.  In raw mode
 	                (-r), the '{}' should not be included in the template.  The
-	                template may also include any %-escaped format strings
+	                template may also include any %-prefixed format strings
 	                recognised by the strftime(3) function.  See below for examples.
+	                The template can not start with a / - it is relative to the
+	                <basedir>.  Unless the -p option is used, all directories up to
+	                - but not including - the first directory with non-escaped
+	                %-format strings of the <template> must already exist for the
+	                log lines to be written to the file.
 
 	Examples:
 	  When used with the httpd CustomLog directive, using %v as the first log format
 	  string:
-	    "|$LJ_NAME '/path/to/logsdir' '{}/logs/access-log-%Y-%m'"
+	    "|$NAME '/path/to/logsdir' '{}/logs/access-log-%Y-%m'"
 	      Where the httpd VirtualHost identifier is 'example.com', would write logs
 	      (with the site identifier stripped) to the filename:
 	        /path/to/logsdir/example.com/logs/access-log-<year>-<month>
-	    "|$LJ_NAME '/path/to/logsdir' '{}/logs/()-access-log-%Y-%m'"
+	    "|$NAME '/path/to/logsdir' '{}/logs/()-access-log-%Y-%m'"
 	      Where the httpd VirtualHost identifier is 'example.com', would write logs
 	      (with the site identifier steipped) to the filename:
 	        /path/to/logsdir/example.com/logs/example.com-access-log-<year>-<month>
 	  When used with the httpd ErrorLog directive (both examples are equilivent):
-	    "|$LJ_NAME -r '/path/to/logsdir' 'logs/error-log-%Y-%m'"
+	    "|$NAME -r '/path/to/logsdir' 'logs/error-log-%Y-%m'"
 	      Would write raw log lines to the filename:
 	        /path/to/logsdir/logs/error-log-<year>-<month>
-	    "|$LJ_NAME -r '/path/to/logsdir/logs' 'error-log-%Y-%m'"
+	    "|$NAME -r '/path/to/logsdir/logs' 'error-log-%Y-%m'"
 	      Equilivant to the above; would write raw log lines to the filename:
 	        /path/to/logsdir/logs/error-log-<year>-<month>
 EOF
@@ -88,7 +172,7 @@ EOF
 display_version() {
   #     |........1.........2.........3.........4.........5.........6.........7.........8
   cat <<-EOF
-	$LJ_NAME v$LJ_VERSION.
+	$NAME v$VERSION.
 	Copyright (c) 2018-2020 Darren 'Tadgy' Austin <darren (at) afterdark.org.uk>.
 	Licensed under the terms of the GNU GPL v3 <http://gnu.org/licenses/gpl.html>.
 	This program is free software; you can modify or redistribute it in accordence
@@ -97,76 +181,123 @@ display_version() {
 EOF
 }
 
+exit_handler() {
+  (( FLAGS[created_fifo] == 1 )) && {
+    rm -f "$INPUT" 2>/dev/null || syslog "warn" "failed to remove pipe/fifo: $INPUT"
+  }
+}
+
 is_dir() {
   # $1		The path to verify is a directory.
-  [[ ! "$1" ]] && return 1
-  [[ ! -d "$1" ]] && {
-    syslog "error" "not a directory: $1"
-    return 1
-  }
+
+  [[ -z "$1" ]] && return 1
+
+  [[ ! -d "$1" ]] && return 1
   return 0
 }
 
 make_dir() {
   # $1		The directory to create.
-  [[ ! "$1" ]] && return 1
-  [[ ! -e "$1" ]] && {
-    umask "$LJ_DIR_UMASK"
-    mkdir -p "$1" 2>/dev/null || {
-      syslog "error" "failed to create directory: $1"
-      return 1
-    }
-  }
+
+  [[ -z "$1" ]] && return 1
+
+  if [[ ! -e "$1" ]]; then
+    umask "$DIR_UMASK"
+    mkdir -p "$1" 2>/dev/null || return 1
+  else
+    is_dir "$1" || return 1
+  fi
   return 0
 }
 
 open_fd() {
-  # $1		The site identifier in the array.
+  # $1		The site/vhost identifier in the array.
   # $2		The log file path to open.
 
-  [[ ! "$1" || ! "$2" ]] && return 1
-
-  umask "$LJ_FILE_UMASK"
-  exec {LJ_FDS[$1]}>>"$2" || {
-    syslog "error" "failed to open log file for writing: $2"
+  [[ -z "$1" || -z "$2" ]] && return 1
+  umask "$FILE_UMASK"
+  # shellcheck disable=SC1083
+  if ! { exec {FDS[$1]}>>"$2"; } 2>/dev/null; then
+    (( FLAGS[${1}-open_fd_fail] == 0 )) && {
+      syslog "error" "failed to open log file for writing: $2"
+      FLAGS[${1}-open_fd_fail]=1
+    }
     return 1
-  }
+  else
+    (( FLAGS[${1}-open_fd_fail] == 1 )) && {
+      syslog "info" "opened log file for writing: $2"
+      FLAGS[${1}-open_fd_fail]=0
+    }
+  fi
   return 0
 }
 
+remove_expansions() {
+  # This function takes a template path as input and will output a path with elements
+  # starting with the first (non-escaped) %-sequence to the end of the path, removed.
+  # That is, it will return the path with the variable parts removed.
+  # $1		The path to parse.
+
+  local IFS='/' ITEMS INDEX
+
+  read -r -a ITEMS <<<"${1//+(\/)/\/}"
+
+  for INDEX in "${!ITEMS[@]}"; do
+    # Thanks to Marc Eberhard for helping with the regex that I couldn't quite get right.
+    if [[ "${ITEMS[INDEX]}" =~ ^((%%)*[^%]*)*[%]?$ ]]; then
+      printf "%s" "${ITEMS[INDEX]}"
+      [[ ! -z "${ITEMS[INDEX+1]}" ]] && [[ "${ITEMS[INDEX+1]}" =~ ^((%%)*[^%]*)*[%]?$ ]] && printf "%s" "/"
+    else
+      break
+    fi
+  done
+}
+
 sigchld_handler() {
-  local LJ_JOB
-  for LJ_JOB in "${!LJ_JOBS[@]}"; do
-    [[ "${LJ_JOBS[$LJ_JOB]}" ]] && {
-      ! kill -0 "${LJ_JOBS[$LJ_JOB]}" >/dev/null 2>&1 && {
-        wait "${LJ_JOBS[$LJ_JOB]}"
-        unset "LJ_JOBS[$LJ_JOB]"
-        (( LJ_RUNNING-- ))
+  local JOB
+
+  for JOB in "${!JOBS[@]}"; do
+    [[ "${JOBS[$JOB]}" ]] && {
+      ! kill -0 "${JOBS[$JOB]}" >/dev/null 2>&1 && {
+        wait "${JOBS[$JOB]}"
+        unset "JOBS[$JOB]"
+        (( RUNNING_JOBS-- ))
       }
     }
   done
   start_compression_jobs
-  (( LJ_RUNNING == 0 )) && set +bm
+  (( RUNNING_JOBS == 0 )) && set +bm
+}
+
+sighup_handler() {
+  local SITE
+
+  syslog "info" "closing all file descriptors"
+  for SITE in "${!FDS[@]}"; do
+    close_fd "$SITE"
+  done
 }
 
 sigterm_handler() {
-  local LJ_SITE LJ_JOB
-  for LJ_SITE in "${!LJ_FDS[@]}"; do
-    { exec {LJ_FDS[$LJ_SITE]}>&-; } 2>/dev/null
+  local SITE
+
+  for SITE in "${!FDS[@]}"; do
+    close_fd "$SITE"
   done
   disown -a
   exit 0
 }
 
 start_compression_jobs() {
-  local LJ_JOB
-  while (( LJ_RUNNING < LJ_MAXJOBS )); do
-    for LJ_JOB in "${!LJ_JOBS[@]}"; do
-      [[ ! "${LJ_JOBS[$LJ_JOB]}" ]] && {
+  local JOB
+
+  while (( RUNNING_JOBS < MAXJOBS )); do
+    for JOB in "${!JOBS[@]}"; do
+      [[ ! "${JOBS[$JOB]}" ]] && {
         set -bm
-        "$LJ_COMPRESSOR" "${LJ_COMPRESSOR_ARGS[@]}" "$LJ_JOB" >/dev/null 2>&1 &
-        LJ_JOBS[$LJ_JOB]="$!"
-        (( LJ_RUNNING++ ))
+        "$COMPRESSOR" "${COMPRESSOR_ARGS[@]}" "$JOB" >/dev/null 2>&1 &
+        JOBS[$JOB]="$!"
+        (( RUNNING_JOBS++ ))
         continue 2
       }
     done
@@ -177,28 +308,51 @@ start_compression_jobs() {
 syslog() {
   # $1		The syslog level at which to log the message.
   # $2		The text of the message to log.
-  [[ ! "$1" || ! "$2" ]] && return 1
-  logger --id="$$" -p "user.$1" -t "$LJ_NAME" "$1: $2" 2>/dev/null
+
+  [[ -z "$1" || -z "$2" ]] && return 1
+
+  logger --id="$$" -p "$SYSLOG_FACILITY.$1" -t "$NAME" "$1: $2" 2>/dev/null
 }
 
 
+# Extended globs are required.
+shopt -s extglob
+
+# Some variables.
+# The array of file descriptors corresponding to each path.
+declare -A FDS
+# The array of jobs needing to be compressed.
+declare -A JOBS
+# The array of flags.
+declare -A FLAGS
+# The number of compression jobs currently active.
+RUNNING_JOBS=0
+# The original arguments to the script.
+ORIG_ARGS=()
+
 # Some detaults.
-LJ_COMPRESSOR_ARGS=( "-9" )
-LJ_COMPRESSOR="gzip"		# Use gzip by default as log processing utils can often natively read gzipped files.
-LJ_FLUSH=0
-LJ_INPUT="/dev/stdin"
-LJ_MAXJOBS="4"
-LJ_LINKFILE=""
-LJ_RAW=0
-LJ_DIR_UMASK="022"
-LJ_FILE_UMASK="022"
-LJ_COMPRESS=0
+COMPRESSOR_ARGS=( "-9" )
+COMPRESSOR="gzip"		# Use gzip by default as log processing utils can often natively read gzipped files.
+INPUT="/dev/stdin"
+MAXJOBS="4"
+LINKFILE=""
+DIR_UMASK="022"
+FILE_UMASK="022"
+PIPE_UMASK="066"
+SYSLOG_FACILITY="user"
+RUNAS_USER=""
+RUNAS_GROUP=""
+FLAGS=([flush]=0 [raw]=0 [compress]=0 [make_parents]=0 [created_fifo]=0 [timed_out]=0 [basedir_vanished]=0 [basedir_notdir]=0)
 
 # trap signals.
 trap 'sigchld_handler' SIGCHLD
-trap '' SIGHUP
+trap 'sighup_handler' SIGHUP
 trap 'syslog "info" "received SIGUSR1 ping request"' SIGUSR1
 trap 'sigterm_handler' SIGTERM
+trap 'exit_handler' EXIT
+
+# Retain the copy of the original arguments.
+#read -r -a ORIG_ARGS <<<"$@"
 
 # Parse command line options.
 while :; do
@@ -206,22 +360,33 @@ while :; do
     -ca)
       # Set the compression command arguments.
       [[ ! "$2" ]] && die "missing argument to -ca"
-      LJ_COMPRESSOR_ARGS=( $2 )
+      read -r -a COMPRESSOR_ARGS <<<"$2"
+      ORIG_ARGS+=("$1" "$2")
       shift 2
       continue
       ;;
     -cc)
       # Set the compression command to use.
       [[ ! "$2" ]] && die "missing argument to -cc"
-      "$2" --help >/dev/null 2>&1 || die "$2: invalid compressor command"
-      LJ_COMPRESSOR="$2"
+      "$2" --help >/dev/null 2>&1 || die "invalid compressor command: $2"
+      COMPRESSOR="$2"
+      ORIG_ARGS+=("$1" "$2")
       shift 2
       continue
       ;;
     -f)
       # Flush files after every write.
-      LJ_FLUSH=1
+      FLAGS[flush]=1
+      ORIG_ARGS+=("$1")
       shift
+      continue
+      ;;
+    -g)
+      # Set the group to run as.
+      (( UID != 0 )) && die "only root can use -g"
+      getent group "$2" >/dev/null 2>&1 || die "invalid group: $2"
+      RUNAS_GROUP="$2"
+      shift 2
       continue
       ;;
     -h|-help|--help)
@@ -230,51 +395,86 @@ while :; do
       exit 0
       ;;
     -i)
-      # Use a FIFO instead of stdin - the FIFO must already exist (use 'mkfifo' first).
-      [[ ! "$2" ]] && die "missing argument to -f"
-      [[ "${2:0:1}" != "/" ]] && die "$2: must be an absolute path"
-      [[ ! -e "$2" ]] && die "$2: no such file"
-      [[ ! -p "$2" ]] && due "$2: not a FIFO"
-      LJ_INPUT="$2"
+      # Use a pipe/FIFO instead of stdin.
+      [[ ! "$2" ]] && die "missing argument to -i"
+      [[ "${2:0:1}" != "/" ]] && die "must be an absolute path: $2"
+      INPUT="$2"
+      ORIG_ARGS+=("$1" "$2")
       shift 2
       continue
       ;;
     -j)
       # Set the maximum number of concurrent compression jobs to have active at once.
-      [[ ! "$2" =~ [0-9]+ ]] && die "$2: invalid number of jobs"
-      (( $2 == 0 )) && die "$2: invalid number of jobs"
-      LJ_MAXJOBS="$2"
+      [[ ! "$2" =~ [0-9]+ ]] && die "invalid number of jobs: $2"
+      (( $2 == 0 )) && die "invalid number of jobs: $2"
+      MAXJOBS="$2"
+      ORIG_ARGS+=("$1" "$2")
       shift 2
       continue
       ;;
     -l)
       # Set the link name to use.
       [[ ! "$2" ]] && die "missing argument to -l"
-      [[ "${2:0:1}" == "/" ]] && die "$2: link name cannot begin with '/'"
-      [[ "${2: -1:1}" == "/" ]] && die "$2: link name cannot end with '/'"
-      LJ_LINKFILE="$2"
+      [[ "${2:0:1}" == "/" ]] && die "link name cannot begin with '/': $2"
+      [[ "${2: -1:1}" == "/" ]] && die "link name cannot end with '/': $2"
+      LINKFILE="$2"
+      ORIG_ARGS+=("$1" "$2")
       shift 2
+      continue
+      ;;
+    -md)
+      # Set the directory umask.
+      [[ ! "$2" ]] && die "missing argument to -md"
+      [[ ! "$2" =~ [0-7]{3,4} ]] && die "invalid umask: $2"
+      DIR_UMASK="$2"
+      ORIG_ARGS+=("$1" "$2")
+      shift 2
+      continue
+      ;;
+    -mf)
+      # Set the file umask.
+      [[ ! "$2" ]] && die "missing argument to -mf"
+      [[ ! "$2" =~ [0-7]{3} ]] && die "invalid umask: $2"
+      FILE_UMASK="$2"
+      ORIG_ARGS+=("$1" "$2")
+      shift 2
+      continue
+      ;;
+    -mp)
+      # Set the pipe umask.
+      [[ ! "$2" ]] && die "missing argument to -mp"
+      [[ ! "$2" =~ [0-7]{3} ]] && die "invalid umask: $2"
+      PIPE_UMASK="$2"
+      shift 2
+      continue
+      ;;
+    -p)
+      # Create parent directories.
+      FLAGS[make_parents]=1
+      ORIG_ARGS+=("$1")
+      shift
       continue
       ;;
     -r)
       # Set raw mode.
-      LJ_RAW=1
+      FLAGS[raw]=1
+      ORIG_ARGS+=("$1")
       shift
       continue
       ;;
-    -ud)
-      # Set the directory umask.
-      [[ ! "$2" ]] && die "missing argument to -ud"
-      [[ ! "$2" =~ [0-7]{3} ]] && die "$2: invalid umask"
-      LJ_DIR_UMASK="$2"
+    -s)
+      # Set the syslog facility.
+      [[ ! "${2,,}" =~ (auth|authpriv|cron|daemon|ftp|kern|lpr|mail|news|syslog|user|uucp|local[0-7]) ]] && die "invalid syslog facility: $2"
+      SYSLOG_FACILITY="${2,,}"
+      ORIG_ARGS+=("$1" "$2")
       shift 2
       continue
       ;;
-    -uf)
-      # Set the file umask.
-      [[ ! "$2" ]] && die "missing argument to -uf"
-      [[ ! "$2" =~ [0-7]{3} ]] && die "$2: invalid umask"
-      LJ_FILE_UMASK="$2"
+    -u)
+      # Set the user to run as.
+      (( UID != 0 )) && die "only root can use -u"
+      getent passwd "$2" >/dev/null 2>&1 || die "invalid user: $2"
+      RUNAS_USER="$2"
       shift 2
       continue
       ;;
@@ -285,7 +485,8 @@ while :; do
       ;;
     -z)
       # Compress logs once they are rotated.
-      LJ_COMPRESS=1
+      FLAGS[compress]=1
+      ORIG_ARGS+=("$1")
       shift
       continue
       ;;
@@ -302,35 +503,52 @@ done
 
 # If there isn't 2 arguments left, exit.
 (( $# != 2 )) && {
-  printf "%s\n" "$LJ_NAME: incorrect number of non-option arguments" >&2
-  printf "%s\n" "Try: $LJ_NAME -h" >&2
+  printf "%s\\n" "$NAME: incorrect number of non-option arguments" >&2
+  printf "%s\\n" "Try: $NAME -h" >&2
   exit 1
 }
 
 # The remaining arguments should be the base directory and the template.
-LJ_BASEDIR="$1"
-LJ_TEMPLATE="$2"
+BASEDIR="${1/%\//}"
+TEMPLATE="$2"
+
+# Apply user and group settings.
+if [[ ! -z "$RUNAS_USER" ]]; then
+  if [[ ! -z "$RUNAS_GROUP" ]]; then
+    exec su -g "$RUNAS_GROUP" -- "$RUNAS_USER" "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE"
+  else
+    exec su -- "$RUNAS_USER" "$@" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE"
+  fi
+elif [[ ! -z "$RUNAS_GROUP" ]]; then
+  exec sg -- "$RUNAS_GROUP" "$0" "${ORIG_ARGS[@]}"
+fi
 
 # Santy checking.
-[[ "${LJ_BASEDIR:0:1}" != "/" ]] && die "$LJ_BASEDIR: must be an absolute path"
-[[ ! -e "$LJ_BASEDIR" ]] && die "$LJ_BASEDIR: base directory does not exist"
-[[ ! -d "$LJ_BASEDIR" ]] && die "$LJ_BASEDIR: not a directory"
-[[ "${LJ_TEMPLATE: -1:1}" == "/" ]] && die "$LJ_TEMPLATE: template cannot end with '/'"
-(( LJ_RAW == 0 )) && [[ ! "$LJ_TEMPLATE" =~ .*\{\} ]] && die "$LJ_TEMPLATE: template must include at least one '{}'"
-(( LJ_RAW != 0 )) && [[ "$LJ_TEMPLATE" =~ .*\{\} ]] && die "$LJ_TEMPLATE: template cannot include '{}'"
-(( LJ_RAW != 0 )) && [[ "$LJ_LINKFILE" =~ .*\{\} ]] && die "$LJ_LINKFILE: link name cannot include '{}'"
+[[ "${BASEDIR:0:1}" != "/" ]] && die "must be an absolute path: $BASEDIR"
+[[ ! -e "$BASEDIR" ]] && die "base directory does not exist: $BASEDIR"
+[[ ! -d "$BASEDIR" ]] && die "not a directory: $BASEDIR"
+[[ ! -w "$BASEDIR" ]] && die "no write permission: $BASEDIR"
+[[ "${TEMPLATE: 0:1}" == "/" ]] && die "template cannot start with '/' - must be a relative path: $TEMPLATE"
+[[ "${TEMPLATE: -1:1}" == "/" ]] && die "template cannot end with '/' - path must be a filename: $TEMPLATE"
+(( FLAGS[raw] == 0 )) && [[ ! "$TEMPLATE" =~ .*\{\} ]] && die "template must include at least one '{}': $TEMPLATE"
+(( FLAGS[raw] != 0 )) && [[ "$TEMPLATE" =~ .*\{\} ]] && die "template cannot include '{}': $TEMPLATE"
+(( FLAGS[raw] != 0 )) && [[ "$LINKFILE" =~ .*\{\} ]] && die "link name cannot include '{}': $LINKFILE"
 
-# The array of file descriptors corresponding to each path.
-declare -A LJ_FDS
-# The array of jobs needing to be compressed.
-declare -A LJ_JOBS
-# The number of compression jobs currently active.
-LJ_RUNNING=0
+# If input is to be a pipe/FIFO, create it if necessary.
+[[ "$INPUT" != "/dev/stdin" ]] && {
+  if [[ ! -e "$INPUT" ]]; then
+    mkfifo "$INPUT" 2>/dev/null || die "failed to create pipe/FIFO: $INPUT"
+    FLAGS[created_fifo]=1
+  elif [[ ! -p "$INPUT" ]]; then
+    die "not a pipe/FIFO: $INPUT"
+  fi
+}
 
+# Main loop
 while :; do
   # Reset used variables.
-  unset LJ_LOG_VHOST LJ_LOG_DATA
-  LJ_TIMED_OUT=0
+  unset LOG_VHOST LOG_DATA
+  FLAGS[timed_out]=0
 
   # Start compression jobs if there's any in the queue.
   start_compression_jobs
@@ -338,132 +556,192 @@ while :; do
   # The time until the top of the next minute - this is used for the 'read' timeout so that
   # closing log files and compression can still occur even if no log lines are written.
   # Note: This does mean we can't have per second log files, but I can't see that being a requirement.
-  LJ_TTNM="$(( 60 - 10#$(printf "%(%S)T") ))"
+  # shellcheck disable=SC2183
+  TTNM="$(( 60 - 10#$(printf "%(%S)T") ))"
 
   # Read the log line.
-  # Note: The $(...) expansion should *not* be quoted in this instance.
-  read -r -t "$LJ_TTNM" $((( LJ_RAW == 0 )) && printf "%s" "LJ_LOG_VHOST") LJ_LOG_DATA <"$LJ_INPUT"
-  LJ_ERR="$?"
-  if (( LJ_ERR > 128 )); then
+  # Note: The $(...) expansion should *not* be quoted in this instance, and the space between
+  # $( and (( is necessary to quiet shellcheck.
+  # shellcheck disable=SC2046
+  read -r -t "$TTNM" $( (( FLAGS[raw] == 0 )) && printf "%s" "LOG_VHOST") LOG_DATA <"$INPUT"
+  ERR="$?"
+
+  # Determine how the read above was exited.
+  if (( ERR > 128 )); then
     # If 'read' timed out, set a marker.
-    LJ_TIMED_OUT=1
-  elif (( LJ_ERR == 1 )); then
-    [[ "$LJ_INPUT" == "/dev/stdin" ]] && {
+    FLAGS[timed_out]=1
+  elif (( ERR == 1 )); then
+    [[ "$INPUT" == "/dev/stdin" ]] && {
       # stdin has been closed by the parent, quit gracefully by raising a SIGTERM.
       kill -TERM "$$"
     }
-  elif (( LJ_ERR != 0 )); then
-    # Unhandled error - sleep for a second and try again.
-    syslog "error" "unhandled return code from 'read': $LJ_ERR"
-    sleep 1
+  elif (( ERR != 0 )); then
+    # Unhandled error - log the issue and continue.
+    syslog "error" "unhandled return code from 'read': $ERR"
     continue
   fi
 
+  # Make sure the base path still exists - it could have disappeared while we were blocked in 'read'.
+  # Note: We won't make this directory ourselves - as it's the base directory it should exist on the system to start with.
+  if [[ ! -e "$BASEDIR" ]]; then
+    (( FLAGS[basedir_vanished] == 0 )) && {
+      syslog "error" "base directory has vanished"
+      FLAGS[basedir_vanished]=1
+    }
+    continue
+  else
+    (( FLAGS[basedir_vanished] == 1 )) && {
+      syslog "info" "base directory has reappeared"
+      FLAGS[basedir_vanished]=0
+    }
+  fi
+
+  # Make sure the base path is a directory.
+  if ! is_dir "$BASEDIR"; then
+    (( FLAGS[basedir_notdir] == 0 )) && {
+      syslog "error" "base path is no longer a directory"
+      FLAGS[basedir_notdir]=1
+    }
+    continue
+  else
+    (( FLAGS[basedir_notdir] == 1 )) && {
+      syslog "info" "base path has become directory again"
+      FLAGS[basedir_notdir]=0
+    }
+  fi
+
   # Expand the strftime-encoded strings in the template.
-  LJ_EXPANDED_TEMPLATE="$(printf "%($LJ_TEMPLATE)T")"
+  EXPANDED_TEMPLATE="$(printf "%($TEMPLATE)T")"
 
   # The old expanded template needs to be seeded if it's not already set from a previous loop.
   # Set it to the same as the current expanded template so that no rotation is done the first time around.
-  [[ -z "$LJ_OLD_TEMPLATE" ]] && LJ_OLD_TEMPLATE="$LJ_EXPANDED_TEMPLATE"
+  [[ -z "$OLD_TEMPLATE" ]] && OLD_TEMPLATE="$EXPANDED_TEMPLATE"
 
   # If the 'read' timed out and the exapnded template is the same as the old expanded template, there is no need to do anything.
-  (( LJ_TIMED_OUT == 1 )) && [[ "$LJ_EXPANDED_TEMPLATE" == "$LJ_OLD_TEMPLATE" ]] && continue
+  (( FLAGS[timed_out] == 1 )) && [[ "$EXPANDED_TEMPLATE" == "$OLD_TEMPLATE" ]] && continue
 
   # If the 'read' did not time out but the line read is empty, don't do anything.
-  (( LJ_TIMED_OUT != 1 )) && [[ "$LJ_LOG_DATA" =~ ^[[:space:]]*$ ]] && continue
-
-  # Make sure the base directory still exists - it could have disappeared while we were blocked in 'read'.
-  # Note: We won't make this directory ourselves - as it's the base directory it should exist on the system to start with.
-  [[ ! -e "$LJ_BASEDIR" ]] && {
-    syslog "error" "directory no longer exists: $LJ_BASEDIR"
-    continue
-  }
-  is_dir "$LJ_BASEDIR" || continue
+  (( FLAGS[timed_out] == 0 )) && [[ "$LOG_DATA" =~ ^[[:space:]]*$ ]] && continue
 
   # If the new expanded template is different from the old, close and reopen all the logs and queue for compression (if required).
-  [[ "$LJ_EXPANDED_TEMPLATE" != "$LJ_OLD_TEMPLATE" ]] && {
+  [[ "$EXPANDED_TEMPLATE" != "$OLD_TEMPLATE" ]] && {
     # Loop through all the open FDs.
-    for LJ_SITE in "${!LJ_FDS[@]}"; do
+    for SITE in "${!FDS[@]}"; do
       # Generate the fully expanded filename from the strftime-expanded template and the site name from the array.
-      LJ_FILENAME="$LJ_BASEDIR/${LJ_EXPANDED_TEMPLATE//\{\}/$LJ_SITE}"
+      FILENAME="$BASEDIR/${EXPANDED_TEMPLATE//\{\}/$SITE}"
 
       # Close the file descriptor for the old log file path.
-      { exec {LJ_FDS[$LJ_SITE]}>&-; } 2>/dev/null || {
-        syslog "warn" "failed to close FD ${LJ_FDS[$LJ_SITE]} for $LJ_SITE"
-        # Don't 'continue' here as we should still be able to open the new log file.  But, it'll leave an FD open indefinitely...
-      }
-      unset "LJ_FDS[$LJ_SITE]"
-      # Create (if necessary) and verify new log file dir.
-      make_dir "${LJ_FILENAME%/*}" || continue
-      is_dir "${LJ_FILENAME%/*}" || continue
+      close_fd "$SITE"
+
+      # Make sure the directory leading up to the expanded part of the template exists.
+      # Note: We don't create this part of the template's path tree as doing so would
+      # potentially allow any path to be created by use of a custom Host: header.
+      check_leading_dirs "$SITE" "$BASEDIR/${TEMPLATE//\{\}/$SITE}" || continue
+
+      # Create what's missing from the full log file's directory based on the expanded template.
+      create_missing_dirs "$SITE" "${FILENAME%/*}" || continue
 
       # Open the new log file.
-      open_fd "$LJ_SITE" "$LJ_FILENAME" || continue
+      open_fd "$SITE" "$FILENAME" || continue
 
       # Fix the now broken symlink - point it to the currently active log file.
-      [[ "$LJ_LINKFILE" ]] && {
-        LJ_LINKFILE_EXPANDED="$(printf "%($LJ_LINKFILE)T")"
+      [[ "$LINKFILE" ]] && {
+        LINKFILE_EXPANDED="$(printf "%($LINKFILE)T")"
         # Note: This will clobber anything that already exists with the link name.
-        rm -rf "$LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_SITE}"
-        ln -sfr "$LJ_FILENAME" "$LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_SITE}" 2>/dev/null || {
-          syslog "error" "failed to fix link: $LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_SITE}"
-        }
+        rm -rf "${BASEDIR:?}/${LINKFILE_EXPANDED//\{\}/$SITE}"
+        if ! ln -sfr "$FILENAME" "$BASEDIR/${LINKFILE_EXPANDED//\{\}/$SITE}"; then
+          (( FLAGS[${SITE}-fix_link] == 0 )) && {
+            syslog "error" "failed to fix link: $BASEDIR/${LINKFILE_EXPANDED//\{\}/$SITE}"
+            FLAGS[${SITE}-fix_link]=1
+          }
+          continue
+        else
+          (( FLAGS[${SITE}-fix_link] == 1 )) && {
+            syslog "info" "fixed link: $BASEDIR/${LINKFILE_EXPANDED//\{\}/$SITE}"
+            FLAGS[${SITE}-fix_link]=0
+          }
+        fi
       }
-
       # Add the old log file to the compression jobs task list.
-      (( LJ_COMPRESS != 0 )) && {
-        LJ_JOBS+=([$LJ_BASEDIR/${LJ_OLD_TEMPLATE//\{\}/$LJ_SITE}]="")
+      (( FLAGS[compress] != 0 )) && {
+        JOBS+=([$BASEDIR/${OLD_TEMPLATE//\{\}/$SITE}]="")
       }
     done
   }
 
   # If the 'read' did not time out, there must be a log line to write.
-  (( LJ_TIMED_OUT == 0 )) && {
-    # If not in raw mode, an unset LJ_LOG_VHOST is an error.
-    # If in raw mode, we need a placeholder for the LJ_FDS array element as LJ_LOG_VHOST would normally be unset.
-    if (( LJ_RAW == 0 )); then
-      [[ ! "$LJ_LOG_VHOST" ]] && {
+  (( FLAGS[timed_out] == 0 )) && {
+    # If not in raw mode, an unset LOG_VHOST is an error.
+    # If in raw mode, we need a placeholder for the FDS array element as LOG_VHOST would normally be unset.
+    if (( FLAGS[raw] == 0 )); then
+      [[ ! "$LOG_VHOST" ]] && {
         syslog "error" "empty VirtualHost site identifier"
         continue
       }
     else
-      LJ_LOG_VHOST="*raw*"
+      LOG_VHOST="_raw_"
     fi
 
     # Generate the fully expanded filename from the strftime-expanded template.
-    LJ_FILENAME="$LJ_BASEDIR/${LJ_EXPANDED_TEMPLATE//\{\}/$LJ_LOG_VHOST}"
+    FILENAME="$BASEDIR/${EXPANDED_TEMPLATE//\{\}/$LOG_VHOST}"
 
-    # Create/check the log file directory.
-    make_dir "${LJ_FILENAME%/*}" || continue
-    is_dir "${LJ_FILENAME%/*}" || continue
+    # Unless the -p option has been used, make sure the directory leading up to the
+    # expanded part of the template exists.
+    (( FLAGS[make_parents] == 0 )) && {
+      check_leading_dirs "$LOG_VHOST" "$BASEDIR/${TEMPLATE//\{\}/$LOG_VHOST}" || continue
+    }
 
-    # If no FD is open for the VHOST, open it.
-    [[ ! "${LJ_FDS[$LJ_LOG_VHOST]}" ]] && {
-      open_fd "$LJ_LOG_VHOST" "$LJ_FILENAME" || continue
+    # Create what's missing from the full log file's directory based on the expanded template.
+    create_missing_dirs "$LOG_VHOST" "${FILENAME%/*}" || continue
+
+    # If no FD is open for the LOG_VHOST, open it.
+    [[ -z "${FDS[$LOG_VHOST]}" ]] && {
+      open_fd "$LOG_VHOST" "$FILENAME" || continue
     }
 
     # Write the log entry.
-    printf "%s\n" "$LJ_LOG_DATA" >&"${LJ_FDS[$LJ_LOG_VHOST]}"
+    printf "%s\\n" "$LOG_DATA" >&"${FDS[$LOG_VHOST]}"
 
     # Flush data to disk if requested.
-    (( LJ_FLUSH == 1 )) && {
-      sync "$LJ_FILENAME" 2>/dev/null || syslog "warn" "failed to sync: $LJ_FILENAME"
+    (( FLAGS[flush] == 1 )) && {
+      if ! sync "$FILENAME" 2>/dev/null; then
+        (( FLAGS[sync_fail] == 0 )) && {
+          syslog "warn" "failed to sync: $FILENAME"
+          FLAGS[sync_fail]=1
+        }
+        continue
+      else
+        (( FLAGS[sync_fail] == 1 )) && {
+          syslog "info" "sync successful: $FILENAME"
+          FLAGS[sync_fail]=0
+        }
+      fi
     }
 
     # Create symlink to the currently active log file.
-    [[ "$LJ_LINKFILE" ]] && {
-      LJ_LINKFILE_EXPANDED="$(printf "%($LJ_LINKFILE)T")"
-      [[ "$(stat -L --printf="%d:%i" "$LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_LOG_VHOST}" 2>/dev/null)" != \
-        "$(stat --printf="%d:%i" "$LJ_FILENAME" 2>/dev/null)" ]] && {
+    [[ "$LINKFILE" ]] && {
+      LINKFILE_EXPANDED="$(printf "%($LINKFILE)T")"
+      [[ "$(stat -L --printf="%d:%i" "$BASEDIR/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}" 2>/dev/null)" != \
+          "$(stat --printf="%d:%i" "$FILENAME" 2>/dev/null)" ]] && {
         # Note: This will clobber anything that already exists with the link name.
-        rm -rf "$LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_LOG_VHOST}"
-        ln -sfr "$LJ_FILENAME" "$LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_LOG_VHOST}" 2>/dev/null || {
-          syslog "error" "failed to create link: $LJ_BASEDIR/${LJ_LINKFILE_EXPANDED//\{\}/$LJ_LOG_VHOST}"
-        }
+        rm -rf "${BASEDIR:?}/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}"
+        if ! ln -sfr "$FILENAME" "$BASEDIR/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}" 2>/dev/null; then
+          (( FLAGS[${LOG_VHOST}-create_link] == 0 )) && {
+            syslog "error" "failed to create link: $BASEDIR/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}"
+            FLAGS[${LOG_VHOST}-create_link]=1
+          }
+          continue
+        else
+          (( FLAGS[${LOG_VHOST}-create_link] == 1 )) && {
+            syslog "info" "created link: $BASEDIR/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}"
+            FLAGS[${LOG_VHOST}-create_link]=0
+          }
+        fi
       }
     }
   }
 
   # Store the last used filename.
-  LJ_OLD_TEMPLATE="$LJ_EXPANDED_TEMPLATE"
+  OLD_TEMPLATE="$EXPANDED_TEMPLATE"
 done
+
