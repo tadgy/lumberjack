@@ -8,7 +8,7 @@
 
 # Script details.
 NAME="${0##*/}"
-VERSION="0.2.0"
+VERSION="0.2.1"
 
 
 # Functions.
@@ -88,13 +88,15 @@ display_help() {
 	                disk writes.  Best to let the kernel do appropriate buffering.
 	  -g <group>	Set name of the group to run with.  Override the usual
 	                behaviour of using the primary group membership of the user
-	                specified with -u and run with this GID.  All files created by
+	                specified with -u and run with this GID.  Log files created by
 	                lumberjack will be owned by this group.  The default is to run
 	                with the primary group that executed lumberjack, which is
-	                usually root.
+	                usually root.  This option is only available to root.
 	  -h		Display this help.
 	  -i <pipe>	Read input from the pipe/FIFO at <pipe>, rather than stdin.
-	                If the pipe/FIFO does not exist, it will be created.
+	                If the pipe/FIFO does not exist, it will be created.  Use '-o'
+	                to set the ownership of the pipe/FIFO.  The pipe/FIFO is created
+	                before any user or group switching is performed.
 	  -j <jobs>	Maximum number of compression jobs to have active at once.
 	                Default: $MAXJOBS.  Don't set this too high.
 	  -l <link>	Create a symlink named <link> to the currently active log file.
@@ -109,6 +111,11 @@ display_help() {
 	                Useful umasks are: 066 and 022.
 	  -mp <umask>	Set the umask used when creating the pipe.  Default: $PIPE_UMASK.
 	                Useful umasks are: 066 and 006.
+	  -o <owner>	Set the owner of the pipe/FIFO automatically created if none
+	                already exists, and -i is used.  The <owner> should be in the
+	                format [user]:[group], where [user] or [group] is optional, but
+	                not both.  The ownership is changed before any user or group
+	                switching is performed.  This option is only available to root.
 	  -p		Make all parents.  Normally, all directories up to - but not
 	                including - the first directory with non-escaped %-format
 	                strings of the <template> (see below) must already exist for the
@@ -125,9 +132,10 @@ display_help() {
 	  -u <user>	Set name of the user to run with.  With this option, as soon as
 	                lumberjack starts it will re-exec itself, running as this user.
 	                Without the -g option, the primary group of <user> is used for
-	                the running GID.  All files created by lumberjack will be owned
+	                the running GID.  Log files created by lumberjack will be owned
 	                by this user.  The default is to run as the user that executed
-	                lumberjack, which is usually root.
+	                lumberjack, which is usually root.  This option is only
+	                available to root.
 	  -v		Display version and copyright information.
 	  -z		Enable compression of the old log files.
 	  --		Cease option processing and begin argument parsing.
@@ -246,7 +254,7 @@ remove_expansions() {
     # Thanks to Marc Eberhard for helping with the regex that I couldn't quite get right.
     if [[ "${ITEMS[INDEX]}" =~ ^((%%)*[^%]*)*[%]?$ ]]; then
       printf "%s" "${ITEMS[INDEX]}"
-      [[ ! -z "${ITEMS[INDEX+1]}" ]] && [[ "${ITEMS[INDEX+1]}" =~ ^((%%)*[^%]*)*[%]?$ ]] && printf "%s" "/"
+      [[ -n "${ITEMS[INDEX+1]}" ]] && [[ "${ITEMS[INDEX+1]}" =~ ^((%%)*[^%]*)*[%]?$ ]] && printf "%s" "/"
     else
       break
     fi
@@ -339,6 +347,7 @@ LINKFILE=""
 DIR_UMASK="022"
 FILE_UMASK="022"
 PIPE_UMASK="066"
+PIPE_OWNER=""
 SYSLOG_FACILITY="user"
 RUNAS_USER=""
 RUNAS_GROUP=""
@@ -350,9 +359,6 @@ trap 'sighup_handler' SIGHUP
 trap 'syslog "info" "received SIGUSR1 ping request"' SIGUSR1
 trap 'sigterm_handler' SIGTERM
 trap 'exit_handler' EXIT
-
-# Retain the copy of the original arguments.
-#read -r -a ORIG_ARGS <<<"$@"
 
 # Parse command line options.
 while :; do
@@ -384,7 +390,7 @@ while :; do
     -g)
       # Set the group to run as.
       (( UID != 0 )) && die "only root can use -g"
-      getent group "$2" >/dev/null 2>&1 || die "invalid group: $2"
+      getent group "$2" >/dev/null 2>&1 || die "invalid group given for -g: $2"
       RUNAS_GROUP="$2"
       shift 2
       continue
@@ -397,7 +403,7 @@ while :; do
     -i)
       # Use a pipe/FIFO instead of stdin.
       [[ ! "$2" ]] && die "missing argument to -i"
-      [[ "${2:0:1}" != "/" ]] && die "must be an absolute path: $2"
+      [[ "${2:0:1}" != "/" ]] && die "must be an absolute path for -i: $2"
       INPUT="$2"
       ORIG_ARGS+=("$1" "$2")
       shift 2
@@ -425,7 +431,7 @@ while :; do
     -md)
       # Set the directory umask.
       [[ ! "$2" ]] && die "missing argument to -md"
-      [[ ! "$2" =~ [0-7]{3,4} ]] && die "invalid umask: $2"
+      [[ ! "$2" =~ [0-7]{3,4} ]] && die "invalid umask given for -md: $2"
       DIR_UMASK="$2"
       ORIG_ARGS+=("$1" "$2")
       shift 2
@@ -434,7 +440,7 @@ while :; do
     -mf)
       # Set the file umask.
       [[ ! "$2" ]] && die "missing argument to -mf"
-      [[ ! "$2" =~ [0-7]{3} ]] && die "invalid umask: $2"
+      [[ ! "$2" =~ [0-7]{3} ]] && die "invalid umask given for -mf: $2"
       FILE_UMASK="$2"
       ORIG_ARGS+=("$1" "$2")
       shift 2
@@ -443,8 +449,20 @@ while :; do
     -mp)
       # Set the pipe umask.
       [[ ! "$2" ]] && die "missing argument to -mp"
-      [[ ! "$2" =~ [0-7]{3} ]] && die "invalid umask: $2"
+      [[ ! "$2" =~ [0-7]{3} ]] && die "invalid umask given for -mp: $2"
       PIPE_UMASK="$2"
+      shift 2
+      continue
+      ;;
+    -o)
+      # Set the ownership of the pipe/FIFO.
+      (( UID != 0 )) && die "only root can use -o"
+      [[ ! "$2" ]] && die "missing argument to -o"
+      [[ ! "$2" =~ ^.*:.*$ ]] && die "option -o must include a ':': $2"
+      [[ -z "${2%%:*}" ]] && [[ -z "${2##*:}" ]] && die "both owner and group missing from -o: $2"
+      [[ -n "${2%%:*}" ]] && { getent passwd "${2%%:*}" >/dev/null 2>&1 || die "invalid user part given for -o: $2"; }
+      [[ -n "${2##*:}" ]] && { getent group "${2##*:}" >/dev/null 2>&1 || die "invalid group part given for -o: $2"; }
+      PIPE_OWNER="$2"
       shift 2
       continue
       ;;
@@ -473,7 +491,7 @@ while :; do
     -u)
       # Set the user to run as.
       (( UID != 0 )) && die "only root can use -u"
-      getent passwd "$2" >/dev/null 2>&1 || die "invalid user: $2"
+      getent passwd "$2" >/dev/null 2>&1 || die "invalid user given for -u: $2"
       RUNAS_USER="$2"
       shift 2
       continue
@@ -512,17 +530,6 @@ done
 BASEDIR="${1/%\//}"
 TEMPLATE="$2"
 
-# Apply user and group settings.
-if [[ ! -z "$RUNAS_USER" ]]; then
-  if [[ ! -z "$RUNAS_GROUP" ]]; then
-    exec su -g "$RUNAS_GROUP" -- "$RUNAS_USER" "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE"
-  else
-    exec su -- "$RUNAS_USER" "$@" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE"
-  fi
-elif [[ ! -z "$RUNAS_GROUP" ]]; then
-  exec sg -- "$RUNAS_GROUP" "$0" "${ORIG_ARGS[@]}"
-fi
-
 # Santy checking.
 [[ "${BASEDIR:0:1}" != "/" ]] && die "must be an absolute path: $BASEDIR"
 [[ ! -e "$BASEDIR" ]] && die "base directory does not exist: $BASEDIR"
@@ -537,12 +544,29 @@ fi
 # If input is to be a pipe/FIFO, create it if necessary.
 [[ "$INPUT" != "/dev/stdin" ]] && {
   if [[ ! -e "$INPUT" ]]; then
+    umask "$PIPE_UMASK"
     mkfifo "$INPUT" 2>/dev/null || die "failed to create pipe/FIFO: $INPUT"
     FLAGS[created_fifo]=1
+    [[ -n "$PIPE_OWNER" ]] && { chown "$PIPE_OWNER" "$INPUT" >/dev/null 2>&1 || die "failed to chown pipe/FIFO: $INPUT"; }
   elif [[ ! -p "$INPUT" ]]; then
     die "not a pipe/FIFO: $INPUT"
   fi
 }
+
+# Apply user and group settings.
+# shellcheck disable=SC2093
+if [[ -n "$RUNAS_USER" ]]; then
+  if [[ -n "$RUNAS_GROUP" ]]; then
+    exec su -g "$RUNAS_GROUP" -- "$RUNAS_USER" "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE"
+    die "failed to exec to change user and group"
+  else
+    exec su -- "$RUNAS_USER" "$@" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE"
+    die "failed to exec to change user"
+  fi
+elif [[ -n "$RUNAS_GROUP" ]]; then
+  exec sg -- "$RUNAS_GROUP" "$0" "${ORIG_ARGS[@]}"
+  die "failed to exec to change group"
+fi
 
 # Main loop
 while :; do
@@ -744,4 +768,3 @@ while :; do
   # Store the last used filename.
   OLD_TEMPLATE="$EXPANDED_TEMPLATE"
 done
-
