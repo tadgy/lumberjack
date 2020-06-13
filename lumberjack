@@ -19,15 +19,15 @@ check_leading_dirs() {
   [[ -z "$1" || -z "$2" ]] && return 1
 
   if ! is_dir "$(remove_expansions "$2")"; then
-    (( FLAGS[${1}-template_prefix] == 0 )) && {
+    (( FLAGS[${1}_template-prefix] == 0 )) && {
       syslog "warn" "prefix directories of template do not exist: $(remove_expansions "$2")"
-      FLAGS[${1}-template_prefix]=1
+      FLAGS[${1}_template-prefix]=1
     }
     return 1
   else
-    (( FLAGS[${1}-template_prefix] == 1 )) && {
+    (( FLAGS[${1}_template-prefix] == 1 )) && {
       syslog "info" "prefix directories of template reappeared: $(remove_expansions "$2")"
-      FLAGS[${1}-template_prefix]=0
+      FLAGS[${1}_template-prefix]=0
     }
   fi
   return 0
@@ -40,7 +40,7 @@ close_fd() {
 
   # shellcheck disable=SC1083
   { exec {FDS[$1]}>&-; } 2>/dev/null || syslog "warn" "failed to close FD ${FDS[$1]} for $1"
-  unset "FDS[$1]" "FLAGS[${1}-template_prefix]" "FLAGS[${1}-make_dir_fail]" "FLAGS[${1}-fix_link]"
+  unset "FDS[$1]" "FLAGS[${1}_template-prefix]" "FLAGS[${1}_make-dir-fail]" "FLAGS[${1}_fix-link]"
 }
 
 create_missing_dirs() {
@@ -50,15 +50,15 @@ create_missing_dirs() {
   [[ -z "$1" || -z "$2" ]] && return 1
 
   if ! make_dir "$2"; then
-    (( FLAGS[${1}-make_dir_fail] == 0 )) && {
+    (( FLAGS[${1}_make-dir-fail] == 0 )) && {
       syslog "warn" "error creating log file's directory: $2"
-      FLAGS[${1}-make_dir_fail]=1
+      FLAGS[${1}_make-dir-fail]=1
     }
     return 1
   else
-    (( FLAGS[${1}-make_dir_fail] == 1 )) && {
+    (( FLAGS[${1}_make-dir-fail] == 1 )) && {
       syslog "info" "created log file's directory: $2"
-      FLAGS[${1}-make_dir_fail]=0
+      FLAGS[${1}_make-dir-fail]=0
     }
   fi
   return 0
@@ -190,7 +190,7 @@ EOF
 }
 
 exit_handler() {
-  (( FLAGS[created_fifo] == 1 )) && {
+  (( FLAGS[created-fifo] == 1 )) && {
     rm -f "$INPUT" 2>/dev/null || syslog "warn" "failed to remove pipe/fifo: $INPUT"
   }
 }
@@ -226,15 +226,15 @@ open_fd() {
   umask "$FILE_UMASK"
   # shellcheck disable=SC1083
   if ! { exec {FDS[$1]}>>"$2"; } 2>/dev/null; then
-    (( FLAGS[${1}-open_fd_fail] == 0 )) && {
+    (( FLAGS[${1}_open-fd-fail] == 0 )) && {
       syslog "error" "failed to open log file for writing: $2"
-      FLAGS[${1}-open_fd_fail]=1
+      FLAGS[${1}_open-fd-fail]=1
     }
     return 1
   else
-    (( FLAGS[${1}-open_fd_fail] == 1 )) && {
+    (( FLAGS[${1}_open-fd-fail] == 1 )) && {
       syslog "info" "opened log file for writing: $2"
-      FLAGS[${1}-open_fd_fail]=0
+      FLAGS[${1}_open-fd-fail]=0
     }
   fi
   return 0
@@ -351,7 +351,7 @@ PIPE_OWNER=""
 SYSLOG_FACILITY="user"
 RUNAS_USER=""
 RUNAS_GROUP=""
-FLAGS=([flush]=0 [raw]=0 [compress]=0 [make_parents]=0 [created_fifo]=0 [timed_out]=0 [basedir_vanished]=0 [basedir_notdir]=0)
+FLAGS=([flush]=0 [raw]=0 [compress]=0 [make-parents]=0 [created-fifo]=0 [timed-out]=0 [basedir-vanished]=0 [basedir-notdir]=0)
 
 # trap signals.
 trap 'sigchld_handler' SIGCHLD
@@ -468,7 +468,7 @@ while :; do
       ;;
     -p)
       # Create parent directories.
-      FLAGS[make_parents]=1
+      FLAGS[make-parents]=1
       ORIG_ARGS+=("$1")
       shift
       continue
@@ -546,7 +546,7 @@ TEMPLATE="$2"
   if [[ ! -e "$INPUT" ]]; then
     umask "$PIPE_UMASK"
     mkfifo "$INPUT" 2>/dev/null || die "failed to create pipe/FIFO: $INPUT"
-    FLAGS[created_fifo]=1
+    FLAGS[created-fifo]=1
     [[ -n "$PIPE_OWNER" ]] && { chown "$PIPE_OWNER" "$INPUT" >/dev/null 2>&1 || die "failed to chown pipe/FIFO: $INPUT"; }
   elif [[ ! -p "$INPUT" ]]; then
     die "not a pipe/FIFO: $INPUT"
@@ -572,7 +572,7 @@ fi
 while :; do
   # Reset used variables.
   unset LOG_VHOST LOG_DATA
-  FLAGS[timed_out]=0
+  FLAGS[timed-out]=0
 
   # Start compression jobs if there's any in the queue.
   start_compression_jobs
@@ -593,7 +593,7 @@ while :; do
   # Determine how the read above was exited.
   if (( ERR > 128 )); then
     # If 'read' timed out, set a marker.
-    FLAGS[timed_out]=1
+    FLAGS[timed-out]=1
   elif (( ERR == 1 )); then
     [[ "$INPUT" == "/dev/stdin" ]] && {
       # stdin has been closed by the parent, quit gracefully by raising a SIGTERM.
@@ -608,29 +608,29 @@ while :; do
   # Make sure the base path still exists - it could have disappeared while we were blocked in 'read'.
   # Note: We won't make this directory ourselves - as it's the base directory it should exist on the system to start with.
   if [[ ! -e "$BASEDIR" ]]; then
-    (( FLAGS[basedir_vanished] == 0 )) && {
+    (( FLAGS[basedir-vanished] == 0 )) && {
       syslog "error" "base directory has vanished"
-      FLAGS[basedir_vanished]=1
+      FLAGS[basedir-vanished]=1
     }
     continue
   else
-    (( FLAGS[basedir_vanished] == 1 )) && {
+    (( FLAGS[basedir-vanished] == 1 )) && {
       syslog "info" "base directory has reappeared"
-      FLAGS[basedir_vanished]=0
+      FLAGS[basedir-vanished]=0
     }
   fi
 
   # Make sure the base path is a directory.
   if ! is_dir "$BASEDIR"; then
-    (( FLAGS[basedir_notdir] == 0 )) && {
+    (( FLAGS[basedir-notdir] == 0 )) && {
       syslog "error" "base path is no longer a directory"
-      FLAGS[basedir_notdir]=1
+      FLAGS[basedir-notdir]=1
     }
     continue
   else
-    (( FLAGS[basedir_notdir] == 1 )) && {
+    (( FLAGS[basedir-notdir] == 1 )) && {
       syslog "info" "base path has become directory again"
-      FLAGS[basedir_notdir]=0
+      FLAGS[basedir-notdir]=0
     }
   fi
 
@@ -642,10 +642,10 @@ while :; do
   [[ -z "$OLD_TEMPLATE" ]] && OLD_TEMPLATE="$EXPANDED_TEMPLATE"
 
   # If the 'read' timed out and the exapnded template is the same as the old expanded template, there is no need to do anything.
-  (( FLAGS[timed_out] == 1 )) && [[ "$EXPANDED_TEMPLATE" == "$OLD_TEMPLATE" ]] && continue
+  (( FLAGS[timed-out] == 1 )) && [[ "$EXPANDED_TEMPLATE" == "$OLD_TEMPLATE" ]] && continue
 
   # If the 'read' did not time out but the line read is empty, don't do anything.
-  (( FLAGS[timed_out] == 0 )) && [[ "$LOG_DATA" =~ ^[[:space:]]*$ ]] && continue
+  (( FLAGS[timed-out] == 0 )) && [[ "$LOG_DATA" =~ ^[[:space:]]*$ ]] && continue
 
   # If the new expanded template is different from the old, close and reopen all the logs and queue for compression (if required).
   [[ "$EXPANDED_TEMPLATE" != "$OLD_TEMPLATE" ]] && {
@@ -674,15 +674,15 @@ while :; do
         # Note: This will clobber anything that already exists with the link name.
         rm -rf "${BASEDIR:?}/${LINKFILE_EXPANDED//\{\}/$SITE}"
         if ! ln -sfr "$FILENAME" "$BASEDIR/${LINKFILE_EXPANDED//\{\}/$SITE}"; then
-          (( FLAGS[${SITE}-fix_link] == 0 )) && {
+          (( FLAGS[${SITE}_fix-link] == 0 )) && {
             syslog "error" "failed to fix link: $BASEDIR/${LINKFILE_EXPANDED//\{\}/$SITE}"
-            FLAGS[${SITE}-fix_link]=1
+            FLAGS[${SITE}_fix-link]=1
           }
           continue
         else
-          (( FLAGS[${SITE}-fix_link] == 1 )) && {
+          (( FLAGS[${SITE}_fix-link] == 1 )) && {
             syslog "info" "fixed link: $BASEDIR/${LINKFILE_EXPANDED//\{\}/$SITE}"
-            FLAGS[${SITE}-fix_link]=0
+            FLAGS[${SITE}_fix-link]=0
           }
         fi
       }
@@ -694,7 +694,7 @@ while :; do
   }
 
   # If the 'read' did not time out, there must be a log line to write.
-  (( FLAGS[timed_out] == 0 )) && {
+  (( FLAGS[timed-out] == 0 )) && {
     # If not in raw mode, an unset LOG_VHOST is an error.
     # If in raw mode, we need a placeholder for the FDS array element as LOG_VHOST would normally be unset.
     if (( FLAGS[raw] == 0 )); then
@@ -711,7 +711,7 @@ while :; do
 
     # Unless the -p option has been used, make sure the directory leading up to the
     # expanded part of the template exists.
-    (( FLAGS[make_parents] == 0 )) && {
+    (( FLAGS[make-parents] == 0 )) && {
       check_leading_dirs "$LOG_VHOST" "$BASEDIR/${TEMPLATE//\{\}/$LOG_VHOST}" || continue
     }
 
@@ -729,15 +729,15 @@ while :; do
     # Flush data to disk if requested.
     (( FLAGS[flush] == 1 )) && {
       if ! sync "$FILENAME" 2>/dev/null; then
-        (( FLAGS[sync_fail] == 0 )) && {
+        (( FLAGS[sync-fail] == 0 )) && {
           syslog "warn" "failed to sync: $FILENAME"
-          FLAGS[sync_fail]=1
+          FLAGS[sync-fail]=1
         }
         continue
       else
-        (( FLAGS[sync_fail] == 1 )) && {
+        (( FLAGS[sync-fail] == 1 )) && {
           syslog "info" "sync successful: $FILENAME"
-          FLAGS[sync_fail]=0
+          FLAGS[sync-fail]=0
         }
       fi
     }
@@ -750,15 +750,15 @@ while :; do
         # Note: This will clobber anything that already exists with the link name.
         rm -rf "${BASEDIR:?}/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}"
         if ! ln -sfr "$FILENAME" "$BASEDIR/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}" 2>/dev/null; then
-          (( FLAGS[${LOG_VHOST}-create_link] == 0 )) && {
+          (( FLAGS[${LOG_VHOST}_create-link] == 0 )) && {
             syslog "error" "failed to create link: $BASEDIR/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}"
-            FLAGS[${LOG_VHOST}-create_link]=1
+            FLAGS[${LOG_VHOST}_create-link]=1
           }
           continue
         else
-          (( FLAGS[${LOG_VHOST}-create_link] == 1 )) && {
+          (( FLAGS[${LOG_VHOST}_create-link] == 1 )) && {
             syslog "info" "created link: $BASEDIR/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}"
-            FLAGS[${LOG_VHOST}-create_link]=0
+            FLAGS[${LOG_VHOST}_create-link]=0
           }
         fi
       }
