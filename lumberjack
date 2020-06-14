@@ -8,7 +8,7 @@
 
 # Script details.
 NAME="${0##*/}"
-VERSION="0.2.2"
+VERSION="0.3.0"
 
 
 # Functions.
@@ -556,17 +556,11 @@ while :; do
   # Start compression jobs if there's any in the queue.
   start_compression_jobs
 
-  # The time until the top of the next minute - this is used for the 'read' timeout so that
-  # closing log files and compression can still occur even if no log lines are written.
-  # Note: This does mean we can't have per second log files, but I can't see that being a requirement.
-  # shellcheck disable=SC2183
-  TTNM="$(( 60 - 10#$(printf "%(%S)T") ))"
-
-  # Read the log line.
-  # Note: The $(...) expansion should *not* be quoted in this instance, and the space between
-  # $( and (( is necessary to quiet shellcheck.
+  # Read the log line, but timeout at the top of the next second if nothing is read.
+  # Note: The second $(...) expansion should *not* be quoted in this instance,
+  # and the space between $( and (( is necessary to quiet shellcheck.
   # shellcheck disable=SC2046
-  read -r -t "$TTNM" -u "$INPUTFD" $( (( FLAGS[raw] == 0 )) && printf "%s" "LOG_VHOST") LOG_DATA
+  read -r -t "0.$(( 999999999 - 10#$(date +%N) ))" -u "$INPUTFD" $( (( FLAGS[raw] == 0 )) && printf "%s" "LOG_VHOST") LOG_DATA
   ERR="$?"
 
   # Determine how the read above was exited.
