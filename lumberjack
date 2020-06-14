@@ -8,7 +8,7 @@
 
 # Script details.
 NAME="${0##*/}"
-VERSION="0.2.1"
+VERSION="0.2.2"
 
 
 # Functions.
@@ -86,12 +86,6 @@ display_help() {
 	  -f		Request flushing of the log file to disk after every write.
 	                This may significantly reduce performance and result in a lot of
 	                disk writes.  Best to let the kernel do appropriate buffering.
-	  -g <group>	Set name of the group to run with.  Override the usual
-	                behaviour of using the primary group membership of the user
-	                specified with -u and run with this GID.  Log files created by
-	                lumberjack will be owned by this group.  The default is to run
-	                with the primary group that executed lumberjack, which is
-	                usually root.  This option is only available to root.
 	  -h		Display this help.
 	  -i <pipe>	Read input from the pipe/FIFO at <pipe>, rather than stdin.
 	                If the pipe/FIFO does not exist, it will be created.  Use '-o'
@@ -112,7 +106,7 @@ display_help() {
 	  -mp <umask>	Set the umask used when creating the pipe.  Default: $PIPE_UMASK.
 	                Useful umasks are: 066 and 006.
 	  -o <owner>	Set the owner of the pipe/FIFO automatically created if none
-	                already exists, and -i is used.  The <owner> should be in the
+	                already exists, and '-i' is used.  The <owner> should be in the
 	                format [user]:[group], where [user] or [group] is optional, but
 	                not both.  The ownership is changed before any user or group
 	                switching is performed.  This option is only available to root.
@@ -130,12 +124,11 @@ display_help() {
 	                <basedir> and <template>.
 	  -s <facility>	Set the syslog facility to be used for logging.  Default: $SYSLOG_FACILITY.
 	  -u <user>	Set name of the user to run with.  With this option, as soon as
-	                lumberjack starts it will re-exec itself, running as this user.
-	                Without the -g option, the primary group of <user> is used for
-	                the running GID.  Log files created by lumberjack will be owned
-	                by this user.  The default is to run as the user that executed
-	                lumberjack, which is usually root.  This option is only
-	                available to root.
+	                $NAME starts it will re-exec itself to run as this user.
+	                Log files created by $NAME will be owned by this user and
+	                its primary group.  The default is to run as the user that
+	                executed $NAME, which is usually root.  This option is
+	                only available to root.
 	  -v		Display version and copyright information.
 	  -z		Enable compression of the old log files.
 	  --		Cease option processing and begin argument parsing.
@@ -151,8 +144,8 @@ display_help() {
 	                template may also include any %-prefixed format strings
 	                recognised by the strftime(3) function.  See below for examples.
 	                The template can not start with a / - it is relative to the
-	                <basedir>.  Unless the -p option is used, all directories up to
-	                - but not including - the first directory with non-escaped
+	                <basedir>.  Unless the '-p' option is used, all directories up
+	                to - but not including - the first directory with non-escaped
 	                %-format strings of the <template> must already exist for the
 	                log lines to be written to the file.
 
@@ -190,6 +183,8 @@ EOF
 }
 
 exit_handler() {
+  (( INPUTFD != 0 )) && { exec {INPUTFD}>&-; } 2>/dev/null
+
   (( FLAGS[created-fifo] == 1 )) && {
     rm -f "$INPUT" 2>/dev/null || syslog "warn" "failed to remove pipe/fifo: $INPUT"
   }
@@ -341,7 +336,8 @@ ORIG_ARGS=()
 # Some detaults.
 COMPRESSOR_ARGS=( "-9" )
 COMPRESSOR="gzip"		# Use gzip by default as log processing utils can often natively read gzipped files.
-INPUT="/dev/stdin"
+INPUT=""
+INPUTFD="0"
 MAXJOBS="4"
 LINKFILE=""
 DIR_UMASK="022"
@@ -350,7 +346,6 @@ PIPE_UMASK="066"
 PIPE_OWNER=""
 SYSLOG_FACILITY="user"
 RUNAS_USER=""
-RUNAS_GROUP=""
 FLAGS=([flush]=0 [raw]=0 [compress]=0 [make-parents]=0 [created-fifo]=0 [timed-out]=0 [basedir-vanished]=0 [basedir-notdir]=0)
 
 # trap signals.
@@ -385,14 +380,6 @@ while :; do
       FLAGS[flush]=1
       ORIG_ARGS+=("$1")
       shift
-      continue
-      ;;
-    -g)
-      # Set the group to run as.
-      (( UID != 0 )) && die "only root can use -g"
-      getent group "$2" >/dev/null 2>&1 || die "invalid group given for -g: $2"
-      RUNAS_GROUP="$2"
-      shift 2
       continue
       ;;
     -h|-help|--help)
@@ -534,7 +521,7 @@ TEMPLATE="$2"
 [[ "${BASEDIR:0:1}" != "/" ]] && die "must be an absolute path: $BASEDIR"
 [[ ! -e "$BASEDIR" ]] && die "base directory does not exist: $BASEDIR"
 [[ ! -d "$BASEDIR" ]] && die "not a directory: $BASEDIR"
-[[ ! -w "$BASEDIR" ]] && die "no write permission: $BASEDIR"
+(( "${FLAGS[make-parents]}" == 1 )) && [[ ! -w "$BASEDIR" ]] && die "no write permission: $BASEDIR"
 [[ "${TEMPLATE: 0:1}" == "/" ]] && die "template cannot start with '/' - must be a relative path: $TEMPLATE"
 [[ "${TEMPLATE: -1:1}" == "/" ]] && die "template cannot end with '/' - path must be a filename: $TEMPLATE"
 (( FLAGS[raw] == 0 )) && [[ ! "$TEMPLATE" =~ .*\{\} ]] && die "template must include at least one '{}': $TEMPLATE"
@@ -542,7 +529,7 @@ TEMPLATE="$2"
 (( FLAGS[raw] != 0 )) && [[ "$LINKFILE" =~ .*\{\} ]] && die "link name cannot include '{}': $LINKFILE"
 
 # If input is to be a pipe/FIFO, create it if necessary.
-[[ "$INPUT" != "/dev/stdin" ]] && {
+[[ -n "$INPUT" ]] && {
   if [[ ! -e "$INPUT" ]]; then
     umask "$PIPE_UMASK"
     mkfifo "$INPUT" 2>/dev/null || die "failed to create pipe/FIFO: $INPUT"
@@ -553,20 +540,12 @@ TEMPLATE="$2"
   fi
 }
 
-# Apply user and group settings.
+# Apply user and setting.
 # shellcheck disable=SC2093
-if [[ -n "$RUNAS_USER" ]]; then
-  if [[ -n "$RUNAS_GROUP" ]]; then
-    exec su -g "$RUNAS_GROUP" -- "$RUNAS_USER" "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE"
-    die "failed to exec to change user and group"
-  else
-    exec su -- "$RUNAS_USER" "$@" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE"
-    die "failed to exec to change user"
-  fi
-elif [[ -n "$RUNAS_GROUP" ]]; then
-  exec sg -- "$RUNAS_GROUP" "$0" "${ORIG_ARGS[@]}"
-  die "failed to exec to change group"
-fi
+[[ -n "$RUNAS_USER" ]] && { exec -a "su" /bin/su - "$RUNAS_USER" -- "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE" || die "failed to exec to change user"; }
+
+# If input is to be a pipe/FIFO, open it.
+[[ -n "$INPUT" ]] && { exec {INPUTFD}<"$INPUT" || die "failed to open pipe/FIFO for reading: $INPUT"; }
 
 # Main loop
 while :; do
@@ -587,7 +566,7 @@ while :; do
   # Note: The $(...) expansion should *not* be quoted in this instance, and the space between
   # $( and (( is necessary to quiet shellcheck.
   # shellcheck disable=SC2046
-  read -r -t "$TTNM" $( (( FLAGS[raw] == 0 )) && printf "%s" "LOG_VHOST") LOG_DATA <"$INPUT"
+  read -r -t "$TTNM" -u "$INPUTFD" $( (( FLAGS[raw] == 0 )) && printf "%s" "LOG_VHOST") LOG_DATA
   ERR="$?"
 
   # Determine how the read above was exited.
@@ -595,7 +574,7 @@ while :; do
     # If 'read' timed out, set a marker.
     FLAGS[timed-out]=1
   elif (( ERR == 1 )); then
-    [[ "$INPUT" == "/dev/stdin" ]] && {
+    (( INPUTFD == 0 )) && {
       # stdin has been closed by the parent, quit gracefully by raising a SIGTERM.
       kill -TERM "$$"
     }
