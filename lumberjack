@@ -8,7 +8,7 @@
 
 # Script details.
 NAME="${0##*/}"
-VERSION="0.3.0"
+VERSION="0.3.1"
 
 
 # Functions.
@@ -545,7 +545,8 @@ TEMPLATE="$2"
 [[ -n "$RUNAS_USER" ]] && { exec -a "su" /bin/su - "$RUNAS_USER" -- "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE" || die "failed to exec to change user"; }
 
 # If input is to be a pipe/FIFO, open it.
-[[ -n "$INPUT" ]] && { exec {INPUTFD}<"$INPUT" || die "failed to open pipe/FIFO for reading: $INPUT"; }
+# Note: The fifo must be opened in read-write mode in order to avoid blocking.
+[[ -n "$INPUT" ]] && { exec {INPUTFD}<>"$INPUT" || die "failed to open pipe/FIFO for reading: $INPUT"; }
 
 # Main loop
 while :; do
@@ -557,8 +558,8 @@ while :; do
   start_compression_jobs
 
   # Read the log line, but timeout at the top of the next second if nothing is read.
-  # Note: The second $(...) expansion should *not* be quoted in this instance,
-  # and the space between $( and (( is necessary to quiet shellcheck.
+  # Note: The second $(...) expansion should *not* be quoted in this instance, and
+  # the space between $( and (( is necessary to quiet shellcheck.
   # shellcheck disable=SC2046
   read -r -t "0.$(( 999999999 - 10#$(date +%N) ))" -u "$INPUTFD" $( (( FLAGS[raw] == 0 )) && printf "%s" "LOG_VHOST") LOG_DATA
   ERR="$?"
