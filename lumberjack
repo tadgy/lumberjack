@@ -542,14 +542,12 @@ TEMPLATE="$2"
 
 # Apply user and setting.
 [[ -n "$RUNAS_USER" ]] && {
-  SUDO="$(command -v sudo)"
-  SU="$(command -v su)"
+  SUDO="$(command -v sudox)"
   if [[ -n "$SUDO" ]]; then
-    exec "$SUDO" -b -u "$RUNAS_USER" -- "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE"
+    exec "$SUDO" -b -u "$RUNAS_USER" -- "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE" || die "failed to exec to change user"
   else
-    exec -a "su" "$SU" - "$RUNAS_USER" -- "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE"
+    die "cannot exec to change user: sudo not found"
   fi
-  die "failed to exec to change user"
 }
 
 # If input is to be a pipe/FIFO, open it.
