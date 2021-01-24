@@ -541,8 +541,16 @@ TEMPLATE="$2"
 }
 
 # Apply user and setting.
-# shellcheck disable=SC2093
-[[ -n "$RUNAS_USER" ]] && { exec -a "su" /bin/su - "$RUNAS_USER" -- "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE" || die "failed to exec to change user"; }
+[[ -n "$RUNAS_USER" ]] && {
+  SUDO="$(command -v sudo)"
+  SU="$(command -v su)"
+  if [[ -n "$SUDO" ]]; then
+    exec "$SUDO" -b -u "$RUNAS_USER" -- "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE"
+  else
+    exec -a "su" "$SU" - "$RUNAS_USER" -- "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE"
+  fi
+  die "failed to exec to change user"
+}
 
 # If input is to be a pipe/FIFO, open it.
 # Note: The fifo must be opened in read-write mode in order to avoid blocking.
