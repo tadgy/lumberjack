@@ -572,7 +572,7 @@ while :; do
   start_compression_jobs
 
   # If debugging is enabled, record the time of entry into the read below.
-  (( DEBUG == 1 )) && printf "%s - %s\n" "$(date "+%Y%m%dT%H%M%S.%N")" "Enter read" >>"$DEBUG_FILE"
+  (( DEBUG == 1 )) && printf "%s - %s\n" "$(date "+%Y%m%d %H%M%S.%N")" "Enter read" >>"$DEBUG_FILE"
 
   # Read the log line, but timeout at the top of the next second if nothing is read.
   # Note: The second $(...) expansion should *not* be quoted in this instance, and
@@ -582,7 +582,7 @@ while :; do
   ERR="$?"
 
   # If debugging, record the time of exit from read.
-  (( DEBUG == 1 )) && printf "%s - %s\n" "$(date "+%Y%m%dT%H%M%S.%N")" "Exit read, ERR = $ERR" >>"$DEBUG_FILE"
+  (( DEBUG == 1 )) && printf "%s - %s\n" "$(date "+%Y%m%d %H%M%S.%N")" "Exit read: ERR = $ERR, VHOST = $LOG_VHOST    DATA = ${LOG_DATA:0:50}" >>"$DEBUG_FILE"
 
   # Determine how the read above was exited.
   if (( ERR > 128 )); then
