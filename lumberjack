@@ -552,11 +552,11 @@ TEMPLATE="$2"
 
 # Apply user and setting.
 [[ -n "$RUNAS_USER" ]] && {
-  SUDO="$(command -v sudo)"
-  if [[ -n "$SUDO" ]]; then
-    exec "$SUDO" -u "$RUNAS_USER" -- "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE" || die "failed to exec to change user"
+  SETPRIV="$(command -v setpriv)"
+  if [[ -n "$SETPRIV" ]]; then
+    exec "$SETPRIV" --keep-groups --reuid "$RUNAS_USER" --regid "$RUNAS_USER" -- "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE" || die "failed to exec to change user"
   else
-    die "cannot exec to change user: sudo not found"
+    die "cannot exec to change user: setpriv not found"
   fi
 }
 
