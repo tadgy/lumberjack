@@ -39,7 +39,7 @@ close_fd() {
   [[ -z "$1" ]] && return 1
 
   # shellcheck disable=SC1083
-  { exec {FDS[$1]}>&-; } 2>/dev/null || syslog "warn" "failed to close FD ${FDS[$1]} for $1"
+  { exec {FDS["$1"]}>&-; } 2>/dev/null || syslog "warn" "failed to close FD ${FDS[$1]} for $1"
   unset "FDS[$1]" "FLAGS[${1}_template-prefix]" "FLAGS[${1}_make-dir-fail]" "FLAGS[${1}_fix-link]"
 }
 
@@ -221,7 +221,7 @@ open_fd() {
   [[ -z "$1" || -z "$2" ]] && return 1
   umask "$FILE_UMASK"
   # shellcheck disable=SC1083
-  if ! { exec {FDS[$1]}>>"$2"; } 2>/dev/null; then
+  if ! { exec {FDS["$1"]}>>"$2"; } 2>/dev/null; then
     (( FLAGS[${1}_open-fd-fail] == 0 )) && {
       syslog "error" "failed to open log file for writing: $2"
       FLAGS[${1}_open-fd-fail]=1
