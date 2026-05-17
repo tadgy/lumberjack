@@ -567,7 +567,7 @@ TEMPLATE="$2"
 # Main loop
 while :; do
   # Reset used variables.
-  unset LOG_VHOST LOG_DATA
+  unset LOG_VHOST LOG_DATA LINE
   FLAGS[timed-out]=0
 
   # Start compression jobs if there's any in the queue.
@@ -577,10 +577,7 @@ while :; do
   (( DEBUG == 1 )) && printf "%s: %s\\n" "$(date "+%Y%m%d %H%M%S.%N")" "enter read" >>"$DEBUG_FILE"
 
   # Read the log line, but timeout at the top of the next second if nothing is read.
-  # Note: The second $(...) expansion should *not* be quoted in this instance, and
-  # the space between $( and (( is necessary to quiet shellcheck.
-  # shellcheck disable=SC2046
-  read -r -t "0.$(( 999999999 - 10#$(date +%N) ))" -u "$INPUTFD" $( (( FLAGS[raw] == 0 )) && printf "%s" "LOG_VHOST") LOG_DATA
+  read -r -t "0.$(( 999999999 - 10#$(date +%N) ))" -u "$INPUTFD" LINE
   ERR="$?"
 
   # If debugging, record the time of exit from read.
@@ -628,6 +625,14 @@ while :; do
       syslog "info" "base path has become directory again"
       FLAGS[basedir-notdir]=0
     }
+  fi
+
+  # Extract the data from the read line.
+  if (( FLAGS[raw] == 0 )); then
+    LOG_VHOST="${LINE%% *}"
+    LOG_DATA="${LINE#* }"
+  else
+    LOG_DATA="$LINE"
   fi
 
   # Expand the strftime-encoded strings in the template.
@@ -741,8 +746,9 @@ while :; do
     # Create symlink to the currently active log file.
     [[ "$LINKFILE" ]] && {
       LINKFILE_EXPANDED="$(printf "%($LINKFILE)T")"
-      [[ "$(stat -L --printf="%d:%i" "$BASEDIR/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}" 2>/dev/null)" != \
-          "$(stat --printf="%d:%i" "$FILENAME" 2>/dev/null)" ]] && {
+      STAT1="$(stat -L --printf="%d:%i" "$BASEDIR/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}" 2>/dev/null)"
+      STAT2="$(stat --printf="%d:%i" "$FILENAME" 2>/dev/null)"
+      [[ "$STAT1" != "$STAT2" ]] && {
         # Note: This will clobber anything that already exists with the link name.
         rm -rf "${BASEDIR:?}/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}"
         if ! ln -sfr "$FILENAME" "$BASEDIR/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}" 2>/dev/null; then
