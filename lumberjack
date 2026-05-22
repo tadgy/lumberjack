@@ -68,6 +68,7 @@ die() {
   # $1		The text of the error message to display on stderr.
 
   (( DEBUG == 1 )) && printf "%s: %s: %s\\n" "$(date "+%Y%m%d %H%M%S.%N")" "die" "$1" >>"$DEBUG_FILE"
+  syslog "err" "$1"
   printf "%s: %s\\n" "$NAME" "$1" >&2
   exit 1
 }
@@ -231,7 +232,7 @@ open_fd() {
   # shellcheck disable=SC1083
   if ! { exec {FDS["$1"]}>>"$2"; } 2>/dev/null; then
     (( FLAGS[${1}_open-fd-fail] == 0 )) && {
-      syslog "error" "failed to open log file for writing: $2"
+      syslog "err" "failed to open log file for writing: $2"
       FLAGS[${1}_open-fd-fail]=1
     }
     return 1
@@ -613,7 +614,7 @@ while :; do
     }
   elif (( ERR != 0 )); then
     # Unhandled error - log the issue and continue.
-    syslog "error" "unhandled return code from 'read': $ERR"
+    syslog "err" "unhandled return code from 'read': $ERR"
     continue
   fi
 
@@ -621,7 +622,7 @@ while :; do
   # Note: We won't make this directory ourselves - as it's the base directory it should exist on the system to start with.
   if [[ ! -e "$BASEDIR" ]]; then
     (( FLAGS[basedir-vanished] == 0 )) && {
-      syslog "error" "base directory has vanished"
+      syslog "err" "base directory has vanished"
       FLAGS[basedir-vanished]=1
     }
     continue
@@ -635,7 +636,7 @@ while :; do
   # Make sure the base path is a directory.
   if ! is_dir "$BASEDIR"; then
     (( FLAGS[basedir-notdir] == 0 )) && {
-      syslog "error" "base path is no longer a directory"
+      syslog "err" "base path is no longer a directory"
       FLAGS[basedir-notdir]=1
     }
     continue
@@ -695,7 +696,7 @@ while :; do
         rm -rf "${BASEDIR:?}/${LINKFILE_EXPANDED//\{\}/$SITE}"
         if ! ln -sfr "$FILENAME" "$BASEDIR/${LINKFILE_EXPANDED//\{\}/$SITE}"; then
           (( FLAGS[${SITE}_fix-link] == 0 )) && {
-            syslog "error" "failed to fix link: $BASEDIR/${LINKFILE_EXPANDED//\{\}/$SITE}"
+            syslog "err" "failed to fix link: $BASEDIR/${LINKFILE_EXPANDED//\{\}/$SITE}"
             FLAGS[${SITE}_fix-link]=1
           }
           continue
@@ -719,7 +720,7 @@ while :; do
     # If in raw mode, we need a placeholder for the FDS array element as LOG_VHOST would normally be unset.
     if (( FLAGS[raw] == 0 )); then
       [[ ! "$LOG_VHOST" ]] && {
-        syslog "error" "empty VirtualHost site identifier"
+        syslog "err" "empty VirtualHost site identifier"
         continue
       }
     else
@@ -772,7 +773,7 @@ while :; do
         rm -rf "${BASEDIR:?}/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}"
         if ! ln -sfr "$FILENAME" "$BASEDIR/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}" 2>/dev/null; then
           (( FLAGS[${LOG_VHOST}_create-link] == 0 )) && {
-            syslog "error" "failed to create link: $BASEDIR/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}"
+            syslog "err" "failed to create link: $BASEDIR/${LINKFILE_EXPANDED//\{\}/$LOG_VHOST}"
             FLAGS[${LOG_VHOST}_create-link]=1
           }
           continue
