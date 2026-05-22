@@ -8,7 +8,7 @@
 
 # Script details.
 NAME="${0##*/}"
-VERSION="0.3.2"
+VERSION="0.4.0"
 
 
 # Functions.
@@ -87,6 +87,14 @@ display_help() {
 	  -f		Request flushing of the log file to disk after every write.
 	                This may significantly reduce performance and result in a lot of
 	                disk writes.  Best to let the kernel do appropriate buffering.
+	  -g <group>	Set name of the group to run with.  With this option, as soon as
+	                $NAME starts it will re-exec itself to run as this group.
+	                Log files created by $NAME will be owned by this group.  The
+	                default is to run as a primary group of any user given by '-u'
+	                or the user that executed $NAME, which is usually root.
+	                When combind with '-u', the group $NAME will run under is no
+	                longer the primary group of that user but will be this group.
+	                This option is only available to root.
 	  -h		Display this help.
 	  -i <pipe>	Read input from the pipe/FIFO at <pipe>, rather than stdin.
 	                If the pipe/FIFO does not exist, it will be created.  Use '-o'
@@ -355,6 +363,7 @@ PIPE_UMASK="066"
 PIPE_OWNER=""
 SYSLOG_FACILITY="user"
 RUNAS_USER=""
+RUNAS_GROUP=""
 FLAGS=([flush]=0 [raw]=0 [compress]=0 [make-parents]=0 [created-fifo]=0 [timed-out]=0 [basedir-vanished]=0 [basedir-notdir]=0)
 
 # trap signals.
@@ -390,6 +399,14 @@ while :; do
       FLAGS[flush]=1
       ORIG_ARGS+=("$1")
       shift
+      continue
+      ;;
+    -g)
+      # Set the group to run as.
+      (( UID != 0 )) && die "only root can use -g"
+      getent group "$2" >/dev/null 2>&1 || die "invalid group given for -g: $2"
+      RUNAS_GROUP="$2"
+      shift 2
       continue
       ;;
     -h|-help|--help)
@@ -551,12 +568,12 @@ TEMPLATE="$2"
 }
 
 # Apply user and setting.
-[[ -n "$RUNAS_USER" ]] && {
+[[ -n "$RUNAS_USER" ]] || [[ -n "$RUNAS_GROUP" ]] && {
   SETPRIV="$(command -v setpriv)"
   if [[ -n "$SETPRIV" ]]; then
-    exec "$SETPRIV" --keep-groups --reuid "$RUNAS_USER" --regid "$RUNAS_USER" -- "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE" || die "failed to exec to change user"
+    exec "$SETPRIV" --keep-groups --reuid "${RUNAS_USER:-$(whoami)}" ${RUNAS_GROUP:+--regid "$RUNAS_GROUP"} -- "$0" "${ORIG_ARGS[@]}" "$BASEDIR" "$TEMPLATE" || die "failed to exec to change user/group"
   else
-    die "cannot exec to change user: setpriv not found"
+    die "cannot exec to change user/group: setpriv not found"
   fi
 }
 
