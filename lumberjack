@@ -297,6 +297,9 @@ sigterm_handler() {
     close_fd "$SITE"
   done
   disown -a
+  (( FLAGS[created-fifo] == 1 )) && {
+    rm -f "$INPUT" 2>/dev/null || syslog "warn" "failed to remove pipe/fifo: $INPUT"
+  }
   exit 0
 }
 
@@ -557,14 +560,13 @@ TEMPLATE="$2"
 
 # If input is to be a pipe/FIFO, create it if necessary.
 [[ -n "$INPUT" ]] && {
-  if [[ ! -e "$INPUT" ]]; then
+  [[ ! -e "$INPUT" ]] || [[ ! -p "$INPUT" ]] && {
     umask "$PIPE_UMASK"
+    rm -f "$INPUT"
     mkfifo "$INPUT" 2>/dev/null || die "failed to create pipe/FIFO: $INPUT"
     FLAGS[created-fifo]=1
     [[ -n "$PIPE_OWNER" ]] && { chown "$PIPE_OWNER" "$INPUT" >/dev/null 2>&1 || die "failed to chown pipe/FIFO: $INPUT"; }
-  elif [[ ! -p "$INPUT" ]]; then
-    die "not a pipe/FIFO: $INPUT"
-  fi
+  }
 }
 
 # Apply user and setting.
